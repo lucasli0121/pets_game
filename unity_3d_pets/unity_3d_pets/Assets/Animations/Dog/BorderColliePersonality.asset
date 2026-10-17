@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 96dec25256eb15c4ebbea9493f0a3d61, type: 3}
+  m_Name: BorderColliePersonality
+  m_EditorClassIdentifier: PetV1.Runtime::PetV1.Pet.PetPersonalityProfile
+  breedId: border_collie
+  basePersonality:
+    energy: 0.8
+    sociability: 0.72
+    affection: 0.68
+    curiosity: 0.82
+    courage: 0.62
+    impulsiveness: 0.55
+    obedience: 0.78
+    playfulness: 0.85
+    independence: 0.42
+    sensitivity: 0.55
+    learningAbility: 0.82
+  individualVariance: 0.12

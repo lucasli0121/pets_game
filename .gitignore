@@ -1,0 +1,54 @@
+# Unity 生成目录
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# IDE
+.vs/
+.idea/
+.vscode/
+*.csproj
+*.unityproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.vsconfig
+
+# Unity3D 生成文件
+sysinfo.txt
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+*.apk
+*.aab
+*.unitypackage
+*.app
+crashlytics-build.properties
+
+# 构建产物
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# Office / WPS 临时锁文件（打开文档时生成）
+~$*
+.~lock.*
+
+# 资源中间产物（模型/贴图导入缓存）
+*.tmp
