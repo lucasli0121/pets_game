@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using PetV1.Animation;
 using PetV1.Behavior;
+using PetV1.Data;
 using PetV1.Diagnostics;
 using PetV1.Interaction;
+using PetV1.Model;
 using PetV1.Pet;
 using PetV1.UI;
 using UnityEditor;
@@ -15,54 +17,49 @@ namespace PetV1.EditorTools
     /// <summary>
     /// 主场景（首页）构建器。
     ///
-    /// 依据《电子宠物 APP V1 设计展板》第 2 页「宠物主场景（首页）」原型，
-    /// 需求文档 3.2 节：3D 场景里显示宠物，宠物主动提示、用户可触摸互动。
+    /// 依据《电子宠物 APP V1 设计展板》第 2 页「宠物主场景（首页）」原型。
     ///
-    /// 展板原型是**写实渲染的室内客厅**，本工程的模型资源是低多边形卡通
-    /// （ithappy Animals FREE）。所以这里的做法是：用 Unity 内置几何体
-    /// 搭出原型的**空间构成和配色**，狗沿用现有模型。
+    /// **场景形态（PRD 4.5，2026-10-18 定）**：
+    /// 一张竖屏 2D 背景图 + 3D 宠物，不再搭 3D 房间。
     ///
-    /// 展板原型里的元素与本实现的对应关系：
-    /// | 展板元素       | 本实现                                |
-    /// |----------------|---------------------------------------|
-    /// | 木地板         | 木色大平板Floor_Wood                 |
-    /// | 草地地毯（绿）  | 绿色地毯 Floor_Grass                 |
-    /// | 蓝色小方垫     | 狗脚下蓝垫 Mat_Pet                    |
-    /// | 石板小路       | 灰石板 Path_Stone                     |
-    /// | 木框落地窗     | 木框 + 半透明窗面 Wall_Window         |
-    /// | 窗台绿植       | 球体灌木 Planter_A/B/C               |
-    /// | 沙发           | 蓝色块 Sofa_Base / Sofa_Back         |
-    /// | 挂画           | 墙上薄板 Picture_A                   |
-    /// | 狗坐在垫子上   | PlaceDog + PetController（坐姿由 Idle 动画表现）|
+    /// 改这个的原因很实际：小游戏首包上限 4MB。完整 3D 房间
+    /// （墙体、地板、家具、光照贴图）单场景就超过 1.5MB，三个场景不可行。
+    /// 背景图单张可压到 200–500KB —— 实测三张合计 880KB：
+    ///   scene_home_day.jpg    1080×1920  178 KB
+    ///   scene_home_night.jpg  1080×1920  282 KB
+    ///   scene_park_day.jpg    1080×1920  420 KB
     ///
-    /// 本阶段**不做 UI**（顶部等级条、底部导航、食物/训练入口、气泡提示），
-    /// UI 需要另开一轮，见需求文档 3.2。调试仍用 PetDebugPanel。
+    /// 因此本构建器**不再创建**：Floor_Wood / Floor_Grass / Wall_Window /
+    /// Sofa_* / Planter_* / Picture_A / Path_Stone / Mat_Pet ——
+    /// 这些全部是背景图里的内容，建 3D 版只会既超包又与背景重复。
+    ///
+    /// 现在创建的：
+    /// - Background quad（Unlit，贴场景图）
+    /// - 正交相机（固定，orthoSize 从 PetSceneLibrary 读）
+    /// - 主光 + 环境光（方向与背景图光源一致：左上）
+    /// - 狗 + PetController + 触摸分区 Collider
+    /// - PetFakeShadow（椭圆半透明假阴影，PRD 硬性要求）
+    /// - PetSceneStage（运行时切场景）
+    /// - TouchInputManager / PetDebugPanel / PetSceneInfo
+    ///
+    /// 本阶段**不做 UI**（顶部等级条、底部导航、食物/训练入口），
+    /// 见需求文档 3.2。调试仍用 PetDebugPanel。
     /// </summary>
     public static class PetHomeSceneBuilder
     {
         public const string HomeScenePath = PetSceneBuilder.ScenesDir + "/PetHome.unity";
-        private const string MatDir = PetSceneBuilder.ScenesDir + "/Materials";
+        public const string SceneLibraryPath = PetSceneBuilder.ScenesDir + "/PetSceneLibrary.asset";
+        public const string BackgroundDir = PetSceneBuilder.ScenesDir + "/Backgrounds";
 
-        // 空间尺寸（米）。狗实测 0.42 × 0.76 × 1.27（宽×高×长），
-        // 下面的尺寸按这个比例定的：狗在画面里占约 1/3 高度。
-        // 房间尺寸按「狗在画面里占约 1/3 高度」倒推，不是照抄写实比例。
-        // 展板里是写实室内，狗看起来很大；换成 0.76m 高的低模狗 + FOV 45，
-        // 房间必须缩到 5×4.5m 才接近那个视觉比例。第一版用 9×7.5m，
-        // 截出来狗只有一个小点，完全不对。
-        private const float RoomWidth = 5.0f;      // X
-        private const float RoomDepth = 4.5f;     // Z
-        private const float WallHeight = 2.2f;
-        private const float WindowBottom = 0.62f;  // 窗台离地高度
+        /// <summary>
+        /// 背景图在**世界坐标**里距相机多远（米）。
+        /// 正交相机没有透视缩放，背景放多远都不影响大小 ——
+        /// 只影响它与宠物的深度排序。放远处保证宠物一定在前面。
+        /// </summary>
+        private const float BackgroundDistance = 40f;
 
-        // 狗的活动范围：比原型里的垫子大一些，让它能走动，
-        // 但不能走到墙外或踩到窗台。
-        private static readonly Vector2 WanderArea = new Vector2(1.15f, 1.0f);
-
-        // 相机参数集中在这里，日志和注释都引用它 ——
-        // 之前逐轮调参时硬编码的文案与实际值不一致（写着 18° 实际 9°），很难发现。
-        private const float CamFov = 45f;
-        private const float CamPitch = 9f;         // 俯角
-        private static readonly Vector3 CamPosition = new Vector3(0f, 0.62f, -2.6f);
+        /// <summary>地面在世界的 Y 坐标。宠物、假阴影、相机反推都以它为基准。</summary>
+        private const float GroundWorldY = 0f;
 
         [MenuItem("Pet V1/3. Build Home Scene", false, 3)]
         public static void BuildHomeScene()
@@ -80,43 +77,61 @@ namespace PetV1.EditorTools
                 return;
             }
 
-            // ---- 所有 AssetDatabase 写操作集中在前面 ----
-            // 见 PetSceneBuilder.BuildAllScenes 的注释：AssetDatabase 写操作会
-            // 触发资产重导入，销毁并重建 ScriptableObject 的 native 实例
-            // （Unity fake null），之后再写入的 animationMap 引用会变成死对象。
-            EnsureFolders();
-            BuildMaterials();
+            var modelProfile = PetAnimationBuilder.LoadModelProfile();
 
-            int wallsLayer = LayerMask.NameToLayer(PetSceneBuilder.WallsLayerName);
-            if (wallsLayer < 0) wallsLayer = 0;
+            // ---- 所有 AssetDatabase 写操作集中在这里 ----
+            // 之后的代码只碰 GameObject，不再写资产。
+            // 原因：AssetDatabase 写操作会触发资产重导入，
+            // Unity 在过程中销毁并重建 ScriptableObject 的 native 实例，
+            // 于是 C# 引用还在但 Unity 重载的 == null 为真，?? 兜不住。
+            EnsureFolders();
+            var library = BuildSceneLibrary();
+            BuildBackgroundAssets();
 
             // ---- 建场景 ----
             var scene = NewSceneInternal();
 
             var map = PetAnimationBuilder.LoadAnimationMap();
-            var profile = PetAnimationBuilder.LoadModelProfile();
             var pet = PetSceneBuilder.PlaceDog(dogPrefab, out Transform rigRoot);
-            // 活动区以 profile 为准（换模型时可调）。WanderArea 常量只作日志展示。
-            pet.SetWanderArea(new Vector2(profile.wanderHalfX, profile.wanderHalfZ), Vector2.zero);
+            pet.SetWanderArea(new Vector2(library.wanderArea.x, library.wanderArea.y), Vector2.zero);
 
-            // 狗坐在地毯中央的蓝垫上，面向镜头（-Z）。
-            pet.transform.position = new Vector3(0f, 0.026f, 0.35f);
-            // 实测（MCP 读 scull 骨骼）：模型默认头朝 +Z，相机在 -Z，
-            // 所以必须转 180 度才是正面朝向镜头。
-            // 反过来不转就是背对 —— 靠骨骼位置判断，不要凭感觉。
+            // 狗站在画面下方偏前的位置。
+            // 依据：背景图是俯视构图，地面占下方约 55%，
+            // 狗 0.76m 高放在这个位置约占画面 16%（正交下更可控）。
+            pet.transform.position = new Vector3(0f, GroundWorldY, 0f);
+
+            // 实测（MCP 读 scull 骨骼）：模型默认头朝 +Z，
+            // 而背景图是「从门口看进去」的视角，狗要正面朝镜头（-Z）。
             pet.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
 
             var controller = PetSceneBuilder.CreateController(pet.gameObject);
             PetSceneBuilder.WireOrchestrator(controller, pet.gameObject, map, "PetHome");
 
-            BuildRoom();
-            BuildFurniture();
-            BuildPetMat();
-
             // ---- 触摸输入 ----
             var touchGo = new GameObject("TouchInputManager");
             var touch = touchGo.AddComponent<TouchInputManager>();
-            var cam = CreateCamera();
+
+            // ---- 相机（正交，固定）----
+            // 先量狗脚的实际世界 Y：模型 bounds.min.y 往往是 -0.01 这种小负值
+            // （蒙皮网格原点不在脚底），拿它当地面线基准才准。
+            float petFootY = MeasureFootY(pet);
+            var cam = CreateOrthographicCamera(library, petFootY);
+
+            // 构图迭代校正：正交俯视下「地面线」与 camY 的关系式推导容易出错，
+            // 改成实测 —— 移动相机量到地面线对齐为止。
+            // 最多迭代 4 次，每次按实测误差的 90% 修正，足够收敛。
+            int iter = AlignGroundLine(cam, petFootY, library);
+            if (iter < 0)
+            {
+                Debug.LogError("[PetV1] 地面线对齐失败，已放弃迭代（相机位置可能不准）。");
+            }
+
+            // ---- 背景 quad ----
+            var bgRenderer = CreateBackgroundQuad(library);
+
+            // ---- 灯光 ----
+            var keyLight = CreateKeyLight(library);
+
             PetSceneBuilder.SetPrivateField(touch, "targetCamera", cam);
             int petLayer = PetSceneBuilder.PetLayerIndex();
             if (petLayer >= 0)
@@ -124,514 +139,612 @@ namespace PetV1.EditorTools
 
             // ---- 身体区域 Collider（Pet 层）----
             // 骨骼名 / 体型 / 活动区全部从 PetModelProfile 读，换模型只改那个 asset。
-            // AssetDatabase 写操作已全部前置（见类注释的 fake null 说明），
-            // 这里加载是安全的。
-            PetSceneBuilder.SetupRegionColliders(pet, rigRoot, profile);
+            PetSceneBuilder.SetupRegionColliders(pet, rigRoot, modelProfile);
 
-            // ---- 墙体与避障 ----
-            // obstacleMask 指向 Walls 层，宠物会在墙前提前转向。
-            var so = new SerializedObject(pet);
-            var maskProp = so.FindProperty("obstacleMask");
-            if (maskProp != null) maskProp.intValue = 1 << wallsLayer;
-            so.ApplyModifiedPropertiesWithoutUndo();
-            EditorUtility.SetDirty(pet);
+            // ---- 椭圆假阴影（PRD 4.5 硬性要求）----
+            var shadow = CreateFakeShadow(pet.transform, modelProfile, library, petFootY);
+
+            // ---- 场景控制（切场景 / 改光）----
+            var stageGo = new GameObject("PetSceneStage");
+            var stage = stageGo.AddComponent<PetSceneStage>();
+            // stage 有专门的 Configure 方法，优先用它；
+            // 剩下的引用走 SetPrivateField（Unity 不知道对象变脏时 SaveScene 会丢改动）
+            stage.Configure(library, pet.transform, keyLight);
+            PetSceneBuilder.SetPrivateField(stage, "backgroundRenderer", bgRenderer);
+            PetSceneBuilder.SetPrivateField(stage, "groundY", petFootY);
+            PetSceneBuilder.SetPrivateField(stage, "currentSceneId",
+                library.scenes.Count > 0 ? library.scenes[0].sceneId : "home_day");
 
             // ---- 行为控制器 ----
             var behavior = pet.gameObject.AddComponent<PetBehaviorController>();
             PetSceneBuilder.WireBehavior(behavior, pet, controller, touch);
+            PetSceneBuilder.SetPrivateField(behavior, "rewardConfig",
+                Resources.Load<InteractionRewardConfig>("PetV1/DefaultInteractionReward"));
 
             // ---- 调试面板 ----
-            var debugGo = new GameObject("PetDebugPanel");
-            var panel = debugGo.AddComponent<PetDebugPanel>();
-            PetSceneBuilder.SetPrivateField(panel, "behaviorController", behavior);
-            PetSceneBuilder.SetPrivateField(panel, "animationOrchestrator", controller);
+            var panelGo = new GameObject("PetDebugPanel");
+            var panel = panelGo.AddComponent<PetDebugPanel>();
             PetSceneBuilder.SetPrivateField(panel, "touchInputManager", touch);
+            PetSceneBuilder.SetPrivateField(panel, "behaviorController", behavior);
 
-            CreateInfoPanel();
+            var infoGo = new GameObject("SceneInfo");
+            var info = infoGo.AddComponent<PetSceneInfo>();
+            info.SetText(
+                $"场景：{library.scenes.Count} 个背景（2D 背景 + 3D 宠物）\n" +
+                $"正交相机 orthoSize={library.orthographicSize:F2}" +
+                $"（可视高 {library.orthographicSize * 2f:F2} m）\n" +
+                $"模型 {modelProfile.bodyWidth:F2}×{modelProfile.bodyHeight:F2}×{modelProfile.bodyLength:F2} m\n" +
+                $"活动区 ±{library.wanderArea.x:F2}×±{library.wanderArea.y:F2} m\n" +
+                $"背景：{BackgroundDir}/（1080×1920）\n" +
+                $"未做 UI（等级条/导航/食物入口），调试用下方面板");
 
-            // 遮挡自检：狗在 x=0，相机也在 x=0。任何放在狗「身后」的
-            // 家具都会挡住它，玩家只看到狗头从物体后面冒出来。
-            // 这个 bug 第一次是靠肉眼看 SceneView 截图发现的，
-            // 布局一改就可能复发，所以做成构建时自动校验。
-            VerifyNoOcclusion(pet, cam);
+            // ---- 自检 ----
+            VerifyComposition(pet, shadow, bgRenderer, cam, library);
 
             PetSceneBuilder.SaveScene(scene, HomeScenePath);
 
-            Debug.Log("[PetV1] 主场景构建完成：\n" +
+            Debug.Log("[PetV1] 主场景构建完成（2D 背景 + 3D 宠物）：\n" +
                       $"  {HomeScenePath}\n" +
-                      $"  空间 {RoomWidth} × {RoomDepth} × {WallHeight} m，" +
-                      $"活动区 ±{profile.wanderHalfX:F2} × ±{profile.wanderHalfZ:F2} m\n" +
-                      $"  模型 {profile.bodyWidth:F2} × {profile.bodyHeight:F2} × {profile.bodyLength:F2} m" +
-                      $"（{PetAnimationBuilder.ModelProfilePath}），朝向镜头（rotation 180°）\n" +
-                      $"  速度 walk {profile.walkSpeed:F1} / run {profile.runSpeed:F1} m/s，转向 {profile.turnSpeed:F0}°/s\n" +
-                      $"  相机 FOV {CamFov}，俯角 {CamPitch}°\n" +
+                      $"  背景库 {SceneLibraryPath}，共 {library.scenes.Count} 个场景\n" +
+                      $"  正交相机 orthoSize={library.orthographicSize:F2}（可视高 {library.orthographicSize * 2f:F2}m），" +
+                      $"俯角 {library.cameraPitch:F0}°\n" +
+                      $"  模型 {modelProfile.bodyWidth:F2} × {modelProfile.bodyHeight:F2} × {modelProfile.bodyLength:F2} m" +
+                      $"（{PetAnimationBuilder.ModelProfilePath}）\n" +
+                      $"  活动区 ±{library.wanderArea.x:F2} × ±{library.wanderArea.y:F2} m\n" +
+                      "  已删除的 3D 房间元素（地板/墙/窗/沙发/绿植/挂画/石板路/蓝垫）\n" +
+                      "    —— 全部已画进背景图，建 3D 版既超首包又与背景重复。\n" +
                       "本阶段未做 UI（顶部等级条 / 底部导航 / 食物训练入口 / 气泡提示）。\n" +
                       "打开该场景按 Play 即可看到狗在客厅里活动。");
         }
 
         // ------------------------------------------------------------------
-        // 遮挡自检
+        // 场景库与背景图资产
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// 检查狗是否被家具挡住。
-        ///
-        /// 判定方式改成**屏幕空间 AABB 重叠 + 深度比较**，不用世界空间的水平距离。
-        ///
-        /// 为什么换判据：第一版用「家具中心到相机→狗连线的水平距离」，
-        /// 并且只检查「狗身后（z 更大）」的物体，结果漏报。
-        /// 当时绿植的叶片因为坐标 bug 全被摆到了世界原点 (0, 0.4, 0)，
-        /// z 比狗小，被「只检查狗身后」这条规则直接过滤掉，
-        /// 而它其实正压在狗身上。自检报告「0 个遮挡」就是这么来的。
-        ///
-        /// 屏幕空间判定不依赖任何坐标假设：玩家在画面上看到家具盖住狗，就一定命中。
+        /// 构建 <see cref="PetSceneLibrary"/>。场景条目与后台 config_scene 对齐。
+        /// 贴图缺失时留空并报警 —— 不能因为图没导入就整个构建失败。
         /// </summary>
-        private static void VerifyNoOcclusion(PetController pet, Camera cam)
+        private static PetSceneLibrary BuildSceneLibrary()
         {
-            var petRenderer = pet.GetComponentInChildren<Renderer>(true);
-            if (petRenderer == null) return;
-
-            Rect petRect = WorldToScreenRect(cam, petRenderer.bounds);
-            float petDepth = petRenderer.bounds.center.z;
-
-            int blockers = 0;
-            int overlapCount = 0;
-            foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())
+            var lib = AssetDatabase.LoadAssetAtPath<PetSceneLibrary>(SceneLibraryPath);
+            if (lib == null)
             {
-                if (root == pet.gameObject) continue;
-                // Room 是地板/墙/窗/挂画，属于背景，不参与遮挡判定
-                if (root.name == "Room") continue;
+                lib = ScriptableObject.CreateInstance<PetSceneLibrary>();
+                AssetDatabase.CreateAsset(lib, SceneLibraryPath);
+            }
 
-                foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+            // 相机与地面参数每次都重置。
+            // 原因：改这些数值时如果保留旧值，改了不会生效 ——
+            // asset 存在就会跳过创建，而字段初始值只在首次 CreateInstance 时起作用。
+            // 这个坑和 ScriptableObject 的 fake null 是同一类问题。
+            lib.orthographicSize = 1.9f;
+            lib.cameraPitch = 12f;
+            lib.cameraDistance = 3.2f;
+            lib.groundLine = 0.42f;
+            lib.wanderArea = new Vector2(1.5f, 0.9f);
+
+            // 场景 id 与后台 config_scene 一致，价格与后台文档 13.4 对齐。
+            var defs = new[]
+            {
+                new
                 {
-                    // 贴地物体（地毯/石板路/垫子）不挡
-                    if (r.bounds.max.y < 0.30f) continue;
+                    id = "home_day", key = "scene_home_day", price = 0, unlockable = false,
+                    file = "scene_home_day.jpg",
+                    light = new Color(1f, 0.97f, 0.90f),
+                    ambient = 1.15f, shadow = 0.32f,
+                    note = "室内白天，光从左上的窗进来"
+                },
+                new
+                {
+                    id = "home_night", key = "scene_home_night", price = 100, unlockable = true,
+                    file = "scene_home_night.jpg",
+                    light = new Color(1f, 0.82f, 0.60f),
+                    ambient = 0.42f, shadow = 0.22f,
+                    note = "室内夜晚，暖黄台灯；宠物亮度必须跟着压暗，否则像贴纸"
+                },
+                new
+                {
+                    id = "park_day", key = "scene_park_day", price = 100, unlockable = true,
+                    file = "scene_park_day.jpg",
+                    light = new Color(1f, 1f, 0.98f),
+                    ambient = 1.30f, shadow = 0.28f,
+                    note = "公园白天，草地反光强，环境光可以更高"
+                },
+            };
 
-                    Rect rect = WorldToScreenRect(cam, r.bounds);
-                    if (!rect.Overlaps(petRect)) continue;
+            lib.scenes = new List<PetSceneLibrary.SceneEntry>();
+            foreach (var d in defs)
+            {
+                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>($"{BackgroundDir}/{d.file}");
+                if (tex == null)
+                {
+                    Debug.LogError($"[PetV1] 背景图缺失：{BackgroundDir}/{d.file}" +
+                                   $"（从 art/scenes/final/ 复制过来）");
+                }
+                else
+                {
+                    CheckBackgroundSize(d.file, tex);
+                }
 
-                    overlapCount++;
-                    // 狗前面（z 更小，靠近相机）才算遮挡
-                    if (r.bounds.center.z >= petDepth) continue;
+                lib.scenes.Add(new PetSceneLibrary.SceneEntry
+                {
+                    sceneId = d.id,
+                    displayNameKey = d.key,
+                    background = tex,
+                    price = d.price,
+                    unlockable = d.unlockable,
+                    // 三张背景图光源都在左上，方向统一；颜色/强度按场景调
+                    lightEuler = new Vector3(42f, -35f, 0f),
+                    lightColor = d.light,
+                    ambientIntensity = d.ambient,
+                    shadowOpacity = d.shadow,
+                });
+            }
 
-                    Debug.LogError($"[PetV1] 遮挡警告：{r.name}（父物体 {r.transform.parent?.name}）" +
-                                   $" 在屏幕上盖住了狗。 z={r.bounds.center.z:F2} < dogZ={petDepth:F2}。" +
-                                   " 请把它移离 x=0 中轴，或挪到狗前方。");
-                    blockers++;
+            EditorUtility.SetDirty(lib);
+            AssetDatabase.SaveAssets();
+            return lib;
+        }
+
+        /// <summary>校验背景图尺寸。PRD 要求 1080×1920，非这个比例会与宠物比例失调。</summary>
+        private static void CheckBackgroundSize(string file, Texture2D tex)
+        {
+            if (tex.width != 1080 || tex.height != 1920)
+            {
+                Debug.LogError($"[PetV1] 背景图 {file} 尺寸为 {tex.width}×{tex.height}，" +
+                               "PRD 要求 1080×1920。比例不对会导致宠物与背景透视对不上。");
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 场景物件
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 正交相机。PRD 4.5：相机固定，用正交投影，
+        /// 避免宠物远近变化导致与背景比例失调。
+        /// </summary>
+        private static Camera CreateOrthographicCamera(PetSceneLibrary lib, float groundWorldY)
+        {
+            var go = new GameObject("Main Camera");
+            go.tag = "MainCamera";
+            // 相机高度由地面线反推，保证狗脚精确落在背景的地面线上。
+            // 见PetSceneLibrary.ComputeCameraPosition 的注释。
+            go.transform.position = lib.ComputeCameraPosition(groundWorldY);
+            go.transform.rotation = Quaternion.Euler(-lib.cameraPitch, 0f, 0f);
+
+            var cam = go.AddComponent<Camera>();
+            cam.orthographic = true;                       // 正交，不用 FOV
+            cam.orthographicSize = lib.orthographicSize;
+            cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = new Color(0.10f, 0.11f, 0.13f);
+            cam.cullingMask = ~0;
+            cam.nearClipPlane = 0.05f;
+            cam.farClipPlane = BackgroundDistance + 10f;
+            cam.allowHDR = false;
+            cam.allowMSAA = true;
+
+            Debug.Log($"[PetV1] 正交相机：orthoSize={lib.orthographicSize:F2}" +
+                      $"（可视高 {lib.orthographicSize * 2f:F2}m），俯角 {lib.cameraPitch:F0}°，" +
+                      $"位置 {go.transform.position}，地面线 {lib.groundLine:P0}，" +
+                      $"狗脚 y={groundWorldY:F3}");
+            return cam;
+        }
+
+        /// <summary>
+        /// 量宠物脚底的实际世界 Y。
+        /// 用 Renderer bounds.min.y 而不是 transform.position.y ——
+        /// 模型原点通常在身体中心或略微下沉，不是脚底。
+        /// </summary>
+        private static float MeasureFootY(PetController pet)
+        {
+            var renderers = pet.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length == 0) return GroundWorldY;
+
+            Bounds b = renderers[0].bounds;
+            foreach (var r in renderers) b.Encapsulate(r.bounds);
+            return b.min.y;
+        }
+
+        /// <summary>
+        /// 迭代校正相机高度，让地面精确落在 <c>groundLine</c>。
+        ///
+        /// 为什么不用闭式公式：正交俯视相机里，地面在画面中的位置受
+        /// 俯角、正交尺寸、模型原点三者影响，闭式解很容易漏项
+        ///（第一版就因为漏了 cos(pitch)，狗脚落在画面 11% 而目标是 42%）。
+        /// 实测校正没有这个风险 —— 直接量 WorldToViewportPoint 的结果。
+        ///
+        /// 收敛：每步按误差的 90% 修正，残余误差按 0.1 倍递减，
+        /// 4 次后为初始的 1e-4，对画面完全不可见。
+        /// 返回迭代次数，-1 表示不收敛。
+        /// </summary>
+        private static int AlignGroundLine(Camera cam, float footWorldY, PetSceneLibrary lib)
+        {
+            // 地面判定点：狗的正下方，靠近画面中心
+            var probe = new Vector3(0f, footWorldY, 0f);
+
+            const int maxIter = 4;
+            const float tolerance = 0.004f;   // 0.4% 画面高度，肉眼不可见
+            Vector3 pos = cam.transform.position;
+
+            for (int i = 1; i <= maxIter; i++)
+            {
+                // 每轮开始都把transform 写回相机并刷新矩阵
+                cam.transform.position = pos;
+                cam.ResetWorldToCameraMatrix();   // worldToCameraMatrix 是只读属性，必须走这个方法刷新
+                float actual = cam.WorldToViewportPoint(probe).y;
+                float err = lib.groundLine - actual;
+                if (Mathf.Abs(err) <= tolerance)
+                {
+                    cam.transform.position = pos;
+                    Debug.Log($"[PetV1] 地面线对齐：{i - 1} 次迭代收敛，" +
+                              $"地面在画面 {actual:P1}（目标 {lib.groundLine:P0}），" +
+                              $"相机 Y={pos.y:F3}");
+                    return i - 1;
+                }
+
+                // 实测斜率而不是推导：相机上移 1cm，地面 viewportY 动多少。
+                // 这样俯角、正交尺寸的影响全被自动吸收。
+                //
+                // 注意：改 position 后必须先 WorldToCameraMatrix 再测。
+                // WorldToViewportPoint 走的是缓存矩阵，直接改 transform 有时读不到
+                // （表现为 slope≈0，因为两次量的是同一个旧矩阵的结果）。
+                float currentY = pos.y;
+                pos.y = currentY + 0.01f;
+                cam.transform.position = pos;
+                cam.ResetWorldToCameraMatrix();   // worldToCameraMatrix 是只读属性，必须走这个方法刷新
+                float slope = (cam.WorldToViewportPoint(probe).y - actual) / 0.01f;
+                if (Mathf.Abs(slope) < 1e-4f)
+                {
+                    Debug.LogError("[PetV1] 地面线对齐失败：相机高度对地面位置无影响" +
+                                   "（slope≈0），检查是否真用了正交投影。");
+                    return -1;
+                }
+
+                pos.y = currentY + err / slope * 0.9f;
+            }
+
+
+            cam.transform.position = pos;
+            float finalV = cam.WorldToViewportPoint(probe).y;
+            Debug.LogWarning($"[PetV1] 地面线对齐：{maxIter} 次迭代后仍未完全收敛，" +
+                             $"地面在画面 {finalV:P1}（目标 {lib.groundLine:P0}），建议看截图确认。");
+            return maxIter;
+        }
+
+        /// <summary>
+        /// 背景 quad。Unlit 材质不吃场景光，
+        /// 这样换场景时只改贴图与灯光，背景本身始终保持原图亮度。
+        /// </summary>
+        private static MeshRenderer CreateBackgroundQuad(PetSceneLibrary lib)
+        {
+            var go = new GameObject("SceneBackground");
+
+            // quad 要与正交画面的宽高比一致。
+            // 正交可视区：宽 = orthoSize*2*aspect，高 = orthoSize*2。
+            var cam = Object.FindAnyObjectByType<Camera>();
+            float aspect = cam != null ? cam.aspect : 9f / 16f;
+            float viewH = lib.orthographicSize * 2f;
+            float viewW = viewH * aspect;
+
+            // 背景图是 9:16（1080×1920）。**绝对不能为了铺满视野去拉伸它**——
+            // 之前写成 if (w < viewW) w = viewW，宽屏视图下背景被横向拉宽
+            //（实测 6.76 × 3.80 = 16:9，而原图是 9:16），画面全变形了。
+            //
+            // 正确做法：按图片自身比例取「高度铺满」的尺寸，
+            // 宽窄出来的部分交给相机裁剪。竖屏设备（aspect≈0.5625）刚好完整显示；
+            // 编辑器宽屏下左右会露出背景外的区域，正式分辨率以竖屏为准，
+            // 那部分由 UI 的顶栏与底部导航盖住。
+            const float imgAspect = 1080f / 1920f;
+            float h = viewH;
+            float w = viewH * imgAspect;
+
+            Debug.Log($"[PetV1] 背景 {w:F2} × {h:F2} m（图比例 9:16），" +
+                      $"正交视野 {viewW:F2} × {viewH:F2} m（比例 {aspect:F3}）" +
+                      (Mathf.Abs(aspect - imgAspect) > 0.05f
+                          ? "—— **视野比例与背景不一致，当前视图会裁切左右**"
+                          : "（比例匹配）"));
+
+            go.transform.position = new Vector3(0f, 0f, BackgroundDistance);
+            go.transform.rotation = Quaternion.Euler(0f, 180f, 0f); // 面向相机（相机在 -Z 看 +Z）
+
+            var mf = go.AddComponent<MeshFilter>();
+            mf.sharedMesh = BuildQuadMesh();
+
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = GetBackgroundMaterial();
+            // 构建时就贴上当前场景的背景图。
+            // PetSceneStage.Start() 只在 Play 模式跑，编辑器里不触发 ——
+            // 不在这里贴的话，编辑器 SceneView 里背景是纯白的，看不出构图对不对。
+            var first = lib.scenes.Count > 0 ? lib.scenes[0] : null;
+            if (mr.sharedMaterial != null && first != null && first.background != null)
+            {
+                mr.sharedMaterial.mainTexture = first.background;
+                Debug.Log($"[PetV1] 背景贴图已绑定：{first.background.name}（{first.sceneId}）");
+            }
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            mr.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            // 背景永远画在最底层
+            mr.sortingOrder = -100;
+
+            // quad 本身是 1×1，靠 scale 放大
+            go.transform.localScale = new Vector3(w, h, 1f);
+
+            Debug.Log($"[PetV1] 背景 quad {w:F2} × {h:F2} m，距相机 {BackgroundDistance:F0} m，" +
+                      $"正交可视区 {viewW:F2} × {viewH:F2} m");
+
+            return mr;
+        }
+
+        /// <summary>
+        /// 主光。方向必须与背景图光源一致（PRD：统一左上），
+        /// 否则宠物身上会有与背景矛盾的第二套影子。
+        /// </summary>
+        private static Light CreateKeyLight(PetSceneLibrary lib)
+        {
+            var entry = lib.scenes.Count > 0 ? lib.scenes[0] : null;
+
+            var go = new GameObject("Key Light");
+            go.transform.rotation = Quaternion.Euler(
+                entry != null ? entry.lightEuler : new Vector3(42f, -35f, 0f));
+
+            var light = go.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.shadows = LightShadows.None;   // 背景不吃阴影，投影没有接收面
+            light.color = entry != null ? entry.lightColor : Color.white;
+            light.intensity = 1f;
+            light.renderMode = LightRenderMode.ForcePixel;
+
+            // 补一盏很弱的反向光，避免背面全黑
+            var fillGo = new GameObject("Fill Light");
+            fillGo.transform.rotation = Quaternion.Euler(-20f, 140f, 0f);
+            var fill = fillGo.AddComponent<Light>();
+            fill.type = LightType.Directional;
+            fill.shadows = LightShadows.None;
+            fill.color = new Color(0.85f, 0.88f, 0.95f);
+            fill.intensity = 0.35f;
+            fill.renderMode = LightRenderMode.ForcePixel;
+
+            if (entry != null) RenderSettings.ambientIntensity = entry.ambientIntensity;
+            return light;
+        }
+
+        /// <summary>
+        /// 椭圆半透明假阴影。PRD 4.5 明确要求 ——
+        /// 2D 背景上的阴影是画出来的，3D 宠物没有接收阴影的地面，
+        /// 没有这个假阴影玩家会觉得狗浮在半空。
+        /// </summary>
+        private static PetFakeShadow CreateFakeShadow(Transform pet, PetModelProfile profile,
+                                                      PetSceneLibrary lib, float groundY)
+        {
+            var go = new GameObject("PetFakeShadow");
+            go.transform.SetParent(pet, false);
+
+            var shadow = go.AddComponent<PetFakeShadow>();
+            shadow.FitToBody(profile.bodyWidth, profile.bodyLength);
+            var entry = lib.scenes.Count > 0 ? lib.scenes[0] : null;
+            shadow.Configure(entry != null ? entry.shadowOpacity : 0.32f);
+            shadow.Attach(pet, groundY);
+
+            Debug.Log($"[PetV1] 假阴影已创建：{profile.bodyWidth * 1.35f:F2} × " +
+                      $"{profile.bodyLength * 0.55f:F2} m（按体型自动算）");
+            return shadow;
+        }
+
+        // ------------------------------------------------------------------
+        // 构图自检
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// 构图自检。判据：
+        /// ① 狗占画面高度在 12%~25% 之间（太小看不见，太大撑满）
+        /// ② 狗的脚在画面地面线附近（不悬空、不陷进背景的家具里）
+        /// ③ 狗在相机视锥内
+        ///
+        /// 正交投影下这些都好算，不像透视要来回试。
+        /// </summary>
+        private static void VerifyComposition(PetController pet, PetFakeShadow shadow,
+                                             MeshRenderer bg, Camera cam, PetSceneLibrary lib)
+        {
+            var renderer = pet.GetComponentInChildren<Renderer>(true);
+            if (renderer == null)
+            {
+                Debug.LogError("[PetV1] 狗没有 Renderer，无法校验构图。");
+                return;
+            }
+
+            // ① 占画面比例
+            var top = cam.WorldToViewportPoint(renderer.bounds.max);
+            var bottom = cam.WorldToViewportPoint(renderer.bounds.min);
+            float ratio = Mathf.Abs(top.y - bottom.y);
+            if (ratio < 0.12f || ratio > 0.25f)
+            {
+                Debug.LogError($"[PetV1] 构图警告：狗占画面高度 {ratio:P1}，" +
+                               "建议 12%~25%。调整 PetSceneLibrary.orthographicSize。");
+            }
+
+            // ② 脚要落在地面线附近（正交下地面是固定高度）
+            float footViewportY = bottom.y;
+            float expected = lib.groundLine;
+            if (Mathf.Abs(footViewportY - expected) > 0.12f)
+            {
+                Debug.LogWarning($"[PetV1] 狗脚在画面 {footViewportY:P1} 高度，" +
+                                 $"背景地面线约在 {expected:P1}。狗会显得悬空或陷进地板。");
+            }
+
+            // ③ 假阴影必须在狗脚下，且水平位置对齐
+            if (shadow != null)
+            {
+                Vector3 sp = shadow.ShadowWorldPosition;
+                Vector3 pp = pet.transform.position;
+                float dxz = Mathf.Abs(sp.x - pp.x) + Mathf.Abs(sp.z - pp.z);
+                if (dxz > 0.02f)
+                {
+                    Debug.LogWarning($"[PetV1] 假阴影偏离狗 {dxz:F3} m，" +
+                                     "狗会像是站在影子旁边。");
+                }
+                if (shadow.CurrentOpacity <= 0.001f)
+                {
+                    Debug.LogWarning("[PetV1] 假阴影不透明度为 0，狗会显得漂浮。");
                 }
             }
 
-            if (blockers == 0)
+            // ④ 背景必须比宠物远
+            if (bg != null)
             {
-                Debug.Log($"[PetV1] 遮挡自检通过：{overlapCount} 个物体与狗屏幕投影重叠，但都在狗后面。");
-            }
-        }
-
-        /// <summary>把世界空间包围盒投影成屏幕像素外接矩形（取 8 个角）。</summary>
-        private static Rect WorldToScreenRect(Camera cam, Bounds b)
-        {
-            float minX = float.MaxValue, minY = float.MaxValue;
-            float maxX = float.MinValue, maxY = float.MinValue;
-
-            for (int i = 0; i < 8; i++)
-            {
-                Vector3 corner = new Vector3(
-                    (i & 1) == 0 ? b.min.x : b.max.x,
-                    (i & 2) == 0 ? b.min.y : b.max.y,
-                    (i & 4) == 0 ? b.min.z : b.max.z);
-
-                Vector3 sp = cam.WorldToScreenPoint(corner);
-                if (sp.z < 0f) continue; // 相机背后
-                minX = Mathf.Min(minX, sp.x);
-                minY = Mathf.Min(minY, sp.y);
-                maxX = Mathf.Max(maxX, sp.x);
-                maxY = Mathf.Max(maxY, sp.y);
+                float bgZ = cam.WorldToViewportPoint(bg.transform.position).z;
+                float petZ = cam.WorldToViewportPoint(pet.transform.position).z;
+                if (bgZ < petZ)
+                {
+                    Debug.LogError($"[PetV1] 背景比宠物更近（bg {bgZ:F2} < pet {petZ:F2}），" +
+                                   "宠物会被背景遮住。");
+                }
             }
 
-            if (minX > maxX) return new Rect(0f, 0f, 0f, 0f); // 整体在相机背后
-            return new Rect(minX, minY, maxX - minX, maxY - minY);
+            Debug.Log($"[PetV1] 构图自检：狗占画面 {ratio:P1}（目标 12%~25%），" +
+                      $"脚在 {footViewportY:P1}（地面线 {expected:P0}），" +
+                      $"正交可视高 {cam.orthographicSize * 2f:F2} m");
         }
-
-        private static Scene NewSceneInternal() => PetSceneBuilder.NewScene(HomeScenePath);
 
         // ------------------------------------------------------------------
-        // 材质
+        // 资产与辅助
         // ------------------------------------------------------------------
 
         private static void EnsureFolders()
         {
             PetAnimationBuilder.EnsureFolder("Assets/Scenes", "PetPrototype");
-            PetAnimationBuilder.EnsureFolder("Assets/Scenes/PetPrototype", "Materials");
+            PetAnimationBuilder.EnsureFolder("Assets/Scenes/PetPrototype", "Backgrounds");
         }
 
-        private static void BuildMaterials()
+        /// <summary>背景材质。Unlit，保证不吃场景光。</summary>
+        private static Material GetBackgroundMaterial()
         {
-            MakeMaterial("Home_WoodFloor", new Color(0.42f, 0.30f, 0.21f), 0.15f, 0.05f);
-            MakeMaterial("Home_GrassRug", new Color(0.47f, 0.65f, 0.34f), 0.02f, 0f);
-            MakeMaterial("Home_PetMat", new Color(0.24f, 0.42f, 0.62f), 0.05f, 0f);
-            MakeMaterial("Home_StonePath", new Color(0.58f, 0.56f, 0.52f), 0f, 0.2f);
-            MakeMaterial("Home_WallPaint", new Color(0.88f, 0.83f, 0.75f), 0f, 0f);
-            MakeMaterial("Home_WallAccent", new Color(0.62f, 0.48f, 0.36f), 0f, 0.1f);
-            MakeMaterial("Home_WindowFrame", new Color(0.45f, 0.33f, 0.24f), 0f, 0.1f);
-            MakeMaterial("Home_SofaFabric", new Color(0.30f, 0.44f, 0.58f), 0.05f, 0f);
-            MakeMaterial("Home_PlanterLeaf", new Color(0.28f, 0.48f, 0.22f), 0.05f, 0f);
-            MakeMaterial("Home_PlanterPot", new Color(0.55f, 0.36f, 0.26f), 0f, 0f);
-            MakeMaterial("Home_PictureFrame", new Color(0.40f, 0.30f, 0.22f), 0f, 0.1f);
-            MakeMaterial("Home_PictureArt", new Color(0.72f, 0.60f, 0.44f), 0f, 0f);
-            MakeWindowGlass();
-        }
+            const string matPath = BackgroundDir + "/Background_Unlit.mat";
 
-        /// <summary>
-        /// 窗玻璃：URP 的 Lit 走透明需要改渲染队列和混合模式，
-        /// 不只是设 _Surface，否则不透明渲染会把它当实心板。
-        /// </summary>
-        private static void MakeWindowGlass()
-        {
-            string path = $"{MatDir}/Home_WindowGlass.mat";
-            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (mat == null)
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            if (mat != null) return mat;
+
+            var shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null) shader = Shader.Find("Unlit/Texture");
+            if (shader == null)
             {
-                mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                AssetDatabase.CreateAsset(mat, path);
+                Debug.LogError("[PetV1] 找不到 Unlit shader，背景无法显示。");
+                return null;
             }
 
-            mat.SetFloat("_Smoothness", 0.95f);
-            mat.SetFloat("_Metallic", 0.05f);
-            // 半透明：窗外有光感，但不挡看狗
-            mat.SetColor("_BaseColor", new Color(0.76f, 0.86f, 0.93f, 0.22f));
-            mat.SetFloat("_Surface", 1f);        // 0=Opaque, 1=Transparent
-            mat.SetFloat("_Blend", 0f);          // Alpha
-            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
-            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
-            mat.SetInt("_ZWrite", 0);
-            mat.DisableKeyword("_ALPHATEST_ON");
-            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-            EditorUtility.SetDirty(mat);
+            mat = new Material(shader);
+            AssetDatabase.CreateAsset(mat, matPath);
+            AssetDatabase.SaveAssets();
+            return AssetDatabase.LoadAssetAtPath<Material>(matPath) ?? mat;
         }
 
-        private static Material MakeMaterial(string name, Color color, float smoothness, float metallic)
+        /// <summary>检查三张背景图是否已复制进工程。</summary>
+        private static void BuildBackgroundAssets()
         {
-            string path = $"{MatDir}/{name}.mat";
-            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (mat == null)
+            var expected = new[] { "scene_home_day.jpg", "scene_home_night.jpg", "scene_park_day.jpg" };
+            int missing = 0;
+            foreach (var f in expected)
             {
-                mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                AssetDatabase.CreateAsset(mat, path);
+                if (AssetDatabase.LoadAssetAtPath<Texture2D>($"{BackgroundDir}/{f}") == null)
+                {
+                    Debug.LogError($"[PetV1] 缺少背景图 {BackgroundDir}/{f}。" +
+                                   "请把 art/scenes/final/ 下的同名文件复制进工程。");
+                    missing++;
+                }
+            }
+            if (missing == 0)
+            {
+                Debug.Log($"[PetV1] 三张背景图齐备（{expected.Length} 张，1080×1920）。");
             }
 
-            if (mat.shader == null) mat.shader = Shader.Find("Universal Render Pipeline/Lit");
-            mat.color = color;
-            mat.SetFloat("_Smoothness", smoothness);
-            mat.SetFloat("_Metallic", metallic);
-            EditorUtility.SetDirty(mat);
-            return mat;
-        }
-
-        private static Material Mat(string name) =>
-            AssetDatabase.LoadAssetAtPath<Material>($"{MatDir}/{name}.mat");
-
-        // ------------------------------------------------------------------
-        // 房间：地板 + 三面墙 + 落地窗
-        // ------------------------------------------------------------------
-
-        private static void BuildRoom()
-        {
-            var root = new GameObject("Room");
-
-            // 木地板
-            Box(root.transform, "Floor_Wood",
-                new Vector3(0f, -0.05f, 0f),
-                new Vector3(RoomWidth, 0.1f, RoomDepth),
-                Mat("Home_WoodFloor"));
-
-            // 后墙（Z 正方向，窗在这面）
-            Box(root.transform, "Wall_Back",
-                new Vector3(0f, WallHeight / 2f, RoomDepth / 2f),
-                new Vector3(RoomWidth, WallHeight, 0.12f),
-                Mat("Home_WallPaint"));
-
-            // 左墙
-            Box(root.transform, "Wall_Left",
-                new Vector3(-RoomWidth / 2f, WallHeight / 2f, 0f),
-                new Vector3(0.12f, WallHeight, RoomDepth),
-                Mat("Home_WallPaint"));
-
-            // 右墙
-            Box(root.transform, "Wall_Right",
-                new Vector3(RoomWidth / 2f, WallHeight / 2f, 0f),
-                new Vector3(0.12f, WallHeight, RoomDepth),
-                Mat("Home_WallPaint"));
-
-            // 相机侧的墙省略（开放取景），但要在场景里留一个地面延伸，
-            // 避免从俯角看到地板边缘之外是虚空。
-            Box(root.transform, "Floor_Front",
-                new Vector3(0f, -0.05f, -RoomDepth / 2f - 1.2f),
-                new Vector3(RoomWidth + 2.5f, 0.1f, 2.4f),
-                Mat("Home_WoodFloor"));
-
-            BuildWindow(root.transform);
-            BuildPicture(root.transform);
-        }
-
-        /// <summary>木框落地窗：贴在后墙上，占据中部，留出窗台。</summary>
-        private static void BuildWindow(Transform parent)
-        {
-            var win = new GameObject("Wall_Window");
-            win.transform.SetParent(parent, false);
-
-            float wallZ = RoomDepth / 2f - 0.02f;
-            float winW = 2.9f;
-            float winH = WallHeight - WindowBottom - 0.28f;
-            float cy = WindowBottom + winH / 2f;
-
-            var frame = Mat("Home_WindowFrame");
-            var glass = Mat("Home_WindowGlass");
-
-            // 窗玻璃
-            Box(win.transform, "Glass",
-                new Vector3(0f, cy, wallZ),
-                new Vector3(winW, winH, 0.04f),
-                glass);
-
-            // 窗框：外框四条 + 中间十字
-            float t = 0.1f;
-            Box(win.transform, "Frame_Bottom", new Vector3(0f, WindowBottom, wallZ), new Vector3(winW + t * 2, t, 0.1f), frame);
-            Box(win.transform, "Frame_Top", new Vector3(0f, WindowBottom + winH, wallZ), new Vector3(winW + t * 2, t, 0.1f), frame);
-            Box(win.transform, "Frame_Left", new Vector3(-winW / 2f, cy, wallZ), new Vector3(t, winH, 0.1f), frame);
-            Box(win.transform, "Frame_Right", new Vector3(winW / 2f, cy, wallZ), new Vector3(t, winH, 0.1f), frame);
-            Box(win.transform, "Frame_MidV", new Vector3(0f, cy, wallZ), new Vector3(0.06f, winH, 0.08f), frame);
-            Box(win.transform, "Frame_MidH", new Vector3(0f, cy, wallZ), new Vector3(winW, 0.06f, 0.08f), frame);
-
-            // 窗台
-            Box(win.transform, "Sill", new Vector3(0f, WindowBottom - 0.06f, wallZ - 0.14f),
-                new Vector3(winW + 0.3f, 0.12f, 0.34f), frame);
-        }
-
-        /// <summary>后墙左侧的挂画，对应展板里的墙上装饰。</summary>
-        private static void BuildPicture(Transform parent)
-        {
-            var pic = new GameObject("Picture_A");
-            pic.transform.SetParent(parent, false);
-            Box(pic.transform, "Frame",
-                new Vector3(-1.85f, 1.42f, RoomDepth / 2f - 0.09f),
-                new Vector3(0.40f, 0.53f, 0.04f),
-                Mat("Home_PictureFrame"));
-            Box(pic.transform, "Canvas",
-                new Vector3(-1.85f, 1.42f, RoomDepth / 2f - 0.12f),
-                new Vector3(0.32f, 0.45f, 0.025f),
-                Mat("Home_PictureArt"));
-        }
-
-        // ------------------------------------------------------------------
-        // 家具与装饰
-        // ------------------------------------------------------------------
-
-        private static void BuildFurniture()
-        {
-            var root = new GameObject("Furniture");
-
-            // 草地地毯（展板里狗脚下的绿色区域，占据房间中央）
-            Box(root.transform, "Floor_Grass",
-                new Vector3(0f, 0.012f, 0.25f),
-                new Vector3(3.4f, 0.024f, 2.8f),
-                Mat("Home_GrassRug"));
-
-            // 石板小路（展板右下角那种浅色石板，斜向穿过草地）
-            var stone = Mat("Home_StonePath");
-            for (int i = 0; i < 5; i++)
+            // 导入设置：背景图有大量柔和渐变，压缩伪影在木地板上很明显，
+            // 所以不压缩。另外 mipmap 在这种大图上是浪费（V1 不做缩放 LOD）。
+            //
+            // **不要动 maxTextureSize**：源图 1080×1920，最长边 1920 已在默认 2048 以内，
+            // 不需要缩放。之前强行设成 2048 反而触发了 Unity 的最长边缩放，
+            // 导入后变成 1024×2048 —— 宽被裁掉 56px，比例从 9:16 变成 1:2，
+            // 宠物与背景透视直接对不上。
+            foreach (var f in expected)
             {
-                float t = i / 4f;
-                Box(root.transform, $"Path_Stone_{i}",
-                    new Vector3(-1.15f + t * 1.9f, 0.032f, -1.05f + t * 0.75f),
-                    new Vector3(0.34f, 0.018f, 0.28f),
-                    stone);
-            }
+                var importer = AssetImporter.GetAtPath($"{BackgroundDir}/{f}") as TextureImporter;
+                if (importer == null) continue;
 
-            // 沙发（展板左侧的蓝色布艺沙发）
-            var sofa = new GameObject("Sofa");
-            sofa.transform.SetParent(root.transform, false);
-            var fabric = Mat("Home_SofaFabric");
-            Box(sofa.transform, "Sofa_Base", new Vector3(-1.72f, 0.15f, 1.42f), new Vector3(1.35f, 0.30f, 0.55f), fabric);
-            Box(sofa.transform, "Sofa_Back", new Vector3(-1.72f, 0.39f, 1.66f), new Vector3(1.35f, 0.34f, 0.12f), fabric);
-            Box(sofa.transform, "Sofa_ArmL", new Vector3(-2.36f, 0.32f, 1.43f), new Vector3(0.11f, 0.20f, 0.54f), fabric);
-            Box(sofa.transform, "Sofa_ArmR", new Vector3(-1.08f, 0.32f, 1.43f), new Vector3(0.11f, 0.20f, 0.54f), fabric);
-
-            // 窗台绿植（三盆，对应展板窗台上的绿植）
-            var leaf = Mat("Home_PlanterLeaf");
-            var pot = Mat("Home_PlanterPot");
-            var planters = new[]
-            {
-                // 三盆分列在窗台两侧，**中轴线（x=0）必须留空** ——
-                // 狗在 x=0，任何放中轴的物体都会正好挡在它后面，
-                // 玩家只看到狗头从物体后面冒出来。
-                // （这个遮挡是从 SceneView 截图里发现的，不是算出来的。）
-                (name: "Planter_A", pos: new Vector3(-1.62f, 0.56f, 2.04f), scale: 1.05f),
-                (name: "Planter_B", pos: new Vector3(-2.05f, 0.56f, 2.04f), scale: 0.85f),
-                (name: "Planter_C", pos: new Vector3(1.66f, 0.56f, 2.04f), scale: 1.15f),
-            };
-            foreach (var p in planters)
-            {
-                var pl = new GameObject(p.name);
-                pl.transform.SetParent(root.transform, false);
-                pl.transform.position = p.pos;
-                float s = p.scale;
-                Cylinder(pl.transform, "Pot", new Vector3(0f, 0.14f * s, 0f), new Vector3(0.19f * s, 0.14f * s, 0.19f * s), pot);
-                Sphere(pl.transform, "Leaf_1", new Vector3(0f, 0.34f * s, 0f), 0.21f * s, leaf);
-                Sphere(pl.transform, "Leaf_2", new Vector3(0.12f * s, 0.46f * s, 0.05f), 0.15f * s, leaf);
-                Sphere(pl.transform, "Leaf_3", new Vector3(-0.1f * s, 0.44f * s, -0.07f), 0.13f * s, leaf);
+                bool needSave = false;
+                if (importer.textureCompression != TextureImporterCompression.Uncompressed)
+                {
+                    importer.textureCompression = TextureImporterCompression.Uncompressed;
+                    needSave = true;
+                }
+                if (importer.mipmapEnabled) { importer.mipmapEnabled = false; needSave = true; }
+                if (importer.wrapMode != TextureWrapMode.Clamp)
+                {
+                    importer.wrapMode = TextureWrapMode.Clamp;
+                    needSave = true;
+                }
+                if (importer.textureType != TextureImporterType.Default)
+                {
+                    importer.textureType = TextureImporterType.Default;
+                    needSave = true;
+                }
+                // NPOT（1080×1920 不是 2 的幂）必须显式设 ToNone，
+                // 否则 Unity 默认按最长边缩放到 2 的幂附近：
+                // 1920 会变成 2048，1080 就被按同比例拉成 1152——
+                // 实测出现过导入后变成 1024×2048，比例从 9:16 变成 1:2。
+                if (importer.npotScale != TextureImporterNPOTScale.None)
+                {
+                    importer.npotScale = TextureImporterNPOTScale.None;
+                    needSave = true;
+                }
+                // maxTextureSize 必须 >= 1920，否则长边会被压掉。
+                // 之前误以为「不动最安全」，其实默认值 2048 就够。
+                if (importer.maxTextureSize < 2048)
+                {
+                    importer.maxTextureSize = 2048;
+                    needSave = true;
+                }
+                if (needSave)
+                {
+                    importer.SaveAndReimport();
+                    var chk = AssetDatabase.LoadAssetAtPath<Texture2D>($"{BackgroundDir}/{f}");
+                    Debug.Log($"[PetV1] 背景图导入设置已修正：{f} -> " +
+                              $"{chk.width}x{chk.height}" +
+                              (chk.width == 1080 && chk.height == 1920
+                                  ? "（正确）" : "（**仍不等于 1080x1920**）"));
+                }
             }
         }
 
-        /// <summary>狗脚下那块蓝色小方垫（展板里狗正坐着的那块）。</summary>
-        private static void BuildPetMat()
+        /// <summary>1×1 quad，法线朝 +Z（配合旋转面向相机）。</summary>
+        private static Mesh BuildQuadMesh()
         {
-            var go = new GameObject("Mat_Pet");
-            go.transform.position = new Vector3(0f, 0.028f, 0.35f);
-            // 略大于狗的俯视投影（1.27m 长 × 0.42m 宽），狗站在垫子上
-            Box(go.transform, "Mat", Vector3.zero, new Vector3(0.82f, 0.014f, 1.42f), Mat("Home_PetMat"));
+            var m = new Mesh { name = "BackgroundQuad" };
+            m.SetVertices(new[]
+            {
+                new Vector3(-0.5f, -0.5f, 0f),
+                new Vector3( 0.5f, -0.5f, 0f),
+                new Vector3( 0.5f,  0.5f, 0f),
+                new Vector3(-0.5f,  0.5f, 0f),
+            });
+            m.SetUVs(0, new[]
+            {
+                new Vector2(0f, 0f), new Vector2(1f, 0f),
+                new Vector2(1f, 1f), new Vector2(0f, 1f),
+            });
+            m.SetNormals(new[]
+            {
+                Vector3.back, Vector3.back, Vector3.back, Vector3.back,
+            });
+            m.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
+            m.RecalculateBounds();
+            return m;
         }
 
-        // ------------------------------------------------------------------
-        // 相机与灯光
-        // ------------------------------------------------------------------
+        private static Scene NewSceneInternal() => PetSceneBuilder.NewScene(HomeScenePath);
 
-        /// <summary>
-        /// 相机：参数见类级常量 CamFov / CamPitch / CamPosition。
-        /// 不跟随宠物——主场景是定格的「客厅全景」，狗在范围内活动即可。
-        /// </summary>
-        private static Camera CreateCamera()
-        {
-            var go = new GameObject("Main Camera");
-            go.tag = "MainCamera";
-            // 从狗的正前方（-Z）略高处俯视。狗在 (0, 0, 0.4)。
-            // 狗在 (0, 0, 0.35)，相机在 -Z 方向略高处俯视。
-            // 这组数值下狗 0.76m 高约占画面 32%，接近展板原型的 1/3。
-            go.transform.position = CamPosition;
-            go.transform.rotation = Quaternion.Euler(CamPitch, 0f, 0f);
-
-            var cam = go.AddComponent<Camera>();
-            cam.fieldOfView = CamFov;
-            cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = new Color(0.82f, 0.80f, 0.76f);
-            cam.nearClipPlane = 0.05f;
-            cam.farClipPlane = 100f;
-            go.AddComponent<AudioListener>();
-
-            // 主光：从窗口方向打进来（展板里窗外是主要光源）
-            var sunGo = new GameObject("Directional Light");
-            sunGo.transform.position = new Vector3(-1.0f, 3.0f, 3.4f);
-            sunGo.transform.rotation = Quaternion.Euler(28f, 200f, 0f);
-            var sun = sunGo.AddComponent<Light>();
-            sun.type = LightType.Directional;
-            sun.intensity = 1.15f;
-            sun.color = new Color(1f, 0.97f, 0.90f);
-            sun.shadows = LightShadows.Soft;
-
-            // 补光：从相机方向压低阴影，避免狗背光死黑
-            var fillGo = new GameObject("Fill Light");
-            fillGo.transform.position = new Vector3(0.9f, 1.5f, -2.4f);
-            fillGo.transform.rotation = Quaternion.Euler(-12f, 15f, 0f);
-            var fill = fillGo.AddComponent<Light>();
-            fill.type = LightType.Directional;
-            fill.intensity = 0.42f;
-            fill.color = new Color(0.88f, 0.92f, 1f);
-            fill.shadows = LightShadows.None;
-
-            return cam;
-        }
-
-        private static void CreateInfoPanel()
-        {
-            var info = new GameObject("SceneInfo");
-            var label = info.AddComponent<PetSceneInfo>();
-            label.SetText(
-                "PET HOME — 主场景（展板第 2 页）\n" +
-                "\n" +
-                "对照展板还原的空间构成：\n" +
-                "  木地板 + 草地地毯 + 蓝色宠物垫 + 石板路\n" +
-                "  木框落地窗 + 窗台绿植 + 沙发 + 挂画\n" +
-                "\n" +
-                $"相机 FOV {CamFov} / 俯角 {CamPitch}°，狗在垫子附近活动\n" +
-                "\n" +
-                "本阶段未做 UI：\n" +
-                "  顶部等级条 / 亲密度 / 设置齿轮\n" +
-                "  底部导航（宠物·食品·商店·场景）\n" +
-                "  食物与训练快捷入口 / 「来摸摸我呀~」气泡\n" +
-                "  （UI 需要另开一轮，见需求文档 3.2）\n" +
-                "\n" +
-                "调试面板开关：反引号 `");
-        }
-
-        // ------------------------------------------------------------------
-        // 几何体辅助
-        // ------------------------------------------------------------------
-
-        /// <summary>
-        /// pos 是**局部坐标**（相对 parent）。
-        ///
-        /// 三个辅助函数必须统一用局部坐标。历史上这里写的是
-        /// SetParent(parent, true) + transform.position = pos（世界坐标），
-        /// 而绿植那几行传的是相对 Planter 的局部偏移，
-        /// 结果所有叶片和花盆都被摆到世界原点 (0, 0.4, 0)——
-        /// 正好压在狗身上（狗在 (0, 0.03, 0.35)）。
-        /// 其余调用方因为父节点都在原点、世界坐标 == 局部坐标，才没暴露出来。
-        /// </summary>
-        private static GameObject Box(Transform parent, string name, Vector3 pos, Vector3 size, Material mat)
-        {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            go.name = name;
-            StripCollider(go);
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = pos;
-            go.transform.localScale = size;
-            ApplyMat(go, mat);
-            return go;
-        }
-
-        private static GameObject Sphere(Transform parent, string name, Vector3 pos, float radius, Material mat)
-        {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            go.name = name;
-            StripCollider(go);
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = pos;
-            go.transform.localScale = Vector3.one * (radius * 2f);
-            ApplyMat(go, mat);
-            return go;
-        }
-
-        private static GameObject Cylinder(Transform parent, string name, Vector3 pos, Vector3 size, Material mat)
-        {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            go.name = name;
-            StripCollider(go);
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = pos;
-            go.transform.localScale = size;
-            ApplyMat(go, mat);
-            return go;
-        }
-
-        /// <summary>
-        /// 去掉 Unity 自动加的 Collider。装饰物不该挡住触摸射线 ——
-        /// 射线只测 Pet 层，但留着多余 Collider 会增加物理开销，
-        /// 也可能在将来改了 mask 后误挡。
-        /// </summary>
-        private static void StripCollider(GameObject go)
-        {
-            var col = go.GetComponent<Collider>();
-            if (col != null) Object.DestroyImmediate(col);
-        }
-
-        private static void ApplyMat(GameObject go, Material mat)
-        {
-            if (mat == null) return;
-            var r = go.GetComponent<Renderer>();
-            if (r != null) r.sharedMaterial = mat;
-        }
-
-        private static bool AssetExists<T>(string path) where T : UnityEngine.Object =>
-            AssetDatabase.LoadAssetAtPath<T>(path) != null;
+        private static bool AssetExists<T>(string path) where T : UnityEngine.Object
+            => AssetDatabase.LoadAssetAtPath<T>(path) != null;
     }
 }

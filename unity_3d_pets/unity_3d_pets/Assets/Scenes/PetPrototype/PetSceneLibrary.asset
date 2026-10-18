@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0cfcb46e3ae491341abbb22a0019d4f9, type: 3}
+  m_Name: PetSceneLibrary
+  m_EditorClassIdentifier: PetV1.Runtime::PetV1.Model.PetSceneLibrary
+  orthographicSize: 1.9
+  cameraPitch: 12
+  cameraDistance: 3.2
+  groundLine: 0.42
+  wanderArea: {x: 1.5, y: 0.9}
+  scenes:
+  - sceneId: home_day
+    displayNameKey: scene_home_day
+    background: {fileID: 2800000, guid: 30da37efd136f514e8a8ffa1e26cd8c2, type: 3}
+    price: 0
+    lightEuler: {x: 42, y: -35, z: 0}
+    lightColor: {r: 1, g: 0.97, b: 0.9, a: 1}
+    ambientIntensity: 1.15
+    shadowOpacity: 0.32
+    unlockable: 0
+  - sceneId: home_night
+    displayNameKey: scene_home_night
+    background: {fileID: 2800000, guid: 8e0bc75c05b995d4989ddf714d31ca0e, type: 3}
+    price: 100
+    lightEuler: {x: 42, y: -35, z: 0}
+    lightColor: {r: 1, g: 0.82, b: 0.6, a: 1}
+    ambientIntensity: 0.42
+    shadowOpacity: 0.22
+    unlockable: 1
+  - sceneId: park_day
+    displayNameKey: scene_park_day
+    background: {fileID: 2800000, guid: 867ca608d11e08648b5b570a29533c81, type: 3}
+    price: 100
+    lightEuler: {x: 42, y: -35, z: 0}
+    lightColor: {r: 1, g: 1, b: 0.98, a: 1}
+    ambientIntensity: 1.3
+    shadowOpacity: 0.28
+    unlockable: 1

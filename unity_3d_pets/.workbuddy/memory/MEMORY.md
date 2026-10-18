@@ -122,6 +122,21 @@ SO 不是场景对象，这个调用永远返回 null，然后静默退回兜底
 **不报错、不生效，最难查**。必须 `Resources.Load<T>()`（约定放
 `Assets/Resources/PetV1/xxx.asset`）或 AssetDatabase。
 
+### 10c2. ScriptableObject 字段初始值只在首次 CreateInstance 时生效
+构建器里 `if (asset == null) CreateInstance()` —— asset 已存在就跳过创建，
+于是改代码里的默认值不生效，asset 里还是旧值。
+**凡是靠默认值生效的参数字段，每次构建都要显式赋值。**
+
+### 10c3. 改了相机 transform 后 `WorldToViewportPoint` 读的是旧矩阵
+算斜率会恒为 0（两次量的是同一个缓存矩阵）。
+必须 `cam.ResetWorldToCameraMatrix()` 刷新。
+`cam.worldToCameraMatrix` 是**只读属性**，直接赋值会 CS0200。
+
+### 10c4. `TextureImporterNPOTScale` 在 Unity 6 里没有 `ToNone`
+成员是 `None` / `ToNearest` / `ToLarger` / `ToSmaller`。
+NPOT 图（如 1080×1920）不设 `None` 会被缩放到 2 的幂附近，
+实测 1080×1920 变成 **1024×2048**，比例从 9:16 变成 1:2。
+
 ### 10d. Editor 类的命名空间是 `PetV1.EditorTools`，不是 `PetV1.Editor`
 写 `PetV1.Editor.PetAnimationBuilder` 会报 CS0234 ——
 因为 `Editor` 这个标识符被命名空间自己占用了。
