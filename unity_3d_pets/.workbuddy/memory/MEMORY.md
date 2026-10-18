@@ -1,8 +1,33 @@
 # 项目记忆：unity_3d_pets
 
 ## 项目概况
-电子宠物 APP V1，用免费 Assets（ithappy Animals FREE, Low Poly）验证「宠物大脑 + 宠物身体 + 用户互动」架构。
-需求文档在 `docs/`：一份 md（模型验证需求方案）+ 两份 docx。
+产品名**宠屋养成记**（微信小游戏简称「宠屋」，软著「宠屋养成记游戏软件 V1.0」）。
+Unity 6.6 + URP，当前用 ithappy Animals FREE 的 `Dog_001` 做架构验证。
+
+### 文档目录职责（2026-10-18 用户明确）
+- `C:/dening_project/pets_game/docs/` —— **全项目**需求与设计文档
+  （PRD、后台管理端需求、三端分发资质清单、设计展板、技术方案、启动清单）
+- `C:/dening_project/pets_game/unity_3d_pets/docs/` —— **只放前端 Unity 技术文档**
+  （当前：`V1_编译与验证报告.md`、`电子宠物APP_V1_代码实现说明.md`）
+
+### V1 已锁定的产品口径（改代码前必读）
+- **形态**：微信小游戏 + 纯 IAA（激励视频），不申请版号，不接虚拟支付
+- **场景**：2D 背景图（1080×1920，≤500KB）+ 3D 宠物，**相机改正交投影**，
+  宠物脚下要有跟随移动的椭圆假阴影。禁止建完整 3D 房间（首包 4MB 装不下）
+- **模型**：Cartoon Dog - Border Collie（Red Deer, Asset Store 293098, 113 动画）。
+  骨骼命名与 Animals FREE 不同，`scull` / `spine.004` 硬编码会失效
+- **数据**：服务端权威。**文档里的养成数值全是示例，不是写死的计算**，
+  全部后台可配。后台 1.3 那条「客户端余额只能显示」同样适用于
+  快乐值/饱腹/经验 —— 客户端自加算等于给改包刷数值留后门
+- **两类情绪要分清**：`happiness`/`satiety`/`exp`/`points` 归服务端；
+  `excitement`/`sleepiness` 是客户端表现层临时量，不入库不同步，
+  但衰减系数仍从配置注入
+- **「点击 5 次 +1 经验」是计数型**（`expPerCount`），不是每次给 0.2。
+  浮点累加有精度漂移且不好幂等，服务端按 `(user_id, gesture_type)` 记次数
+- **积分**：初始 500 / 签到 100 天 / 升级 100 级 / 广告 100 次
+- **等级经验**：×1.5 递增取整，必须走 `config_level` 表，客户端不做等级计算
+- **合规红线**：不做抽奖/开箱/概率付费；文案不得出现「充值」「购买」「元」「¥」
+- **V1 砍掉**：语音互动、排泄动画、邀请/转发奖励、训练面板（留接口）
 
 ## 验证方式（Unity MCP 已接入，2026-10-17）
 
@@ -83,6 +108,23 @@ C# 引用还在，但 Unity 重载的 `== null` 为真，而 `??` 只检查真 n
 
 ### 10. `GetInstanceID()` 在 Unity 6 已废弃
 用 `GetEntityId()`，或干脆别用。出现在字典 key 里会直接编译失败（CS0619）。
+
+### 10b. 三个反复踩到的编译错
+- `PetLog.System(msg)` **只有单参重载**。带 kv 要写
+  `PetLog.Verb(PetLogChannel.System, msg, PetLog.Kv(...))`。已踩两次。
+- `const` 成员不能用实例引用访问（CS0176）：
+  `cfg.someConst` 不行，要写 `TypeName.someConst`。
+- MCP 脚本里 `CompilationPipeline` 有命名空间冲突（`Unity.CompilationPipeline` 也存在），
+  必须写全 `UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation()`。
+
+### 10c. `FindAnyObjectByType<T>()` 对 ScriptableObject 无效
+SO 不是场景对象，这个调用永远返回 null，然后静默退回兜底常量 ——
+**不报错、不生效，最难查**。必须 `Resources.Load<T>()`（约定放
+`Assets/Resources/PetV1/xxx.asset`）或 AssetDatabase。
+
+### 10d. Editor 类的命名空间是 `PetV1.EditorTools`，不是 `PetV1.Editor`
+写 `PetV1.Editor.PetAnimationBuilder` 会报 CS0234 ——
+因为 `Editor` 这个标识符被命名空间自己占用了。
 
 ### 11. Layers 由构建工具自动建
 `EnsureLayerExists("Walls", 8)` 改 `TagManager.asset`，用户层起点是第 8 层（0-7 内置）。

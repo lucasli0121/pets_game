@@ -1,0 +1,85 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a8e1a6cacbead2a468fdcfe0854cf4a3, type: 3}
+  m_Name: DefaultInteractionReward
+  m_EditorClassIdentifier: PetV1.Runtime::PetV1.Data.InteractionRewardConfig
+  entries:
+  - gestureType: Tap
+    happinessDelta: 1
+    satietyDelta: 0
+    expDelta: 0
+    expPerCount: 5
+    enabled: 1
+  - gestureType: DoubleTap
+    happinessDelta: 1
+    satietyDelta: 0
+    expDelta: 0
+    expPerCount: 5
+    enabled: 1
+  - gestureType: ScreenTap
+    happinessDelta: 1
+    satietyDelta: 0
+    expDelta: 0
+    expPerCount: 5
+    enabled: 1
+  - gestureType: Stroke
+    happinessDelta: 2
+    satietyDelta: 0
+    expDelta: 0
+    expPerCount: 0
+    enabled: 1
+  - gestureType: LongPress
+    happinessDelta: 2
+    satietyDelta: 0
+    expDelta: 0
+    expPerCount: 0
+    enabled: 1
+  - gestureType: MultiScratch
+    happinessDelta: 5
+    satietyDelta: 0
+    expDelta: 1
+    expPerCount: 0
+    enabled: 1
+  - gestureType: ScreenScratch
+    happinessDelta: 5
+    satietyDelta: 0
+    expDelta: 1
+    expPerCount: 0
+    enabled: 1
+  - gestureType: FastSwipe
+    happinessDelta: 5
+    satietyDelta: 0
+    expDelta: 1
+    expPerCount: 0
+    enabled: 1
+  - gestureType: ScreenSwipe
+    happinessDelta: 5
+    satietyDelta: 0
+    expDelta: 1
+    expPerCount: 0
+    enabled: 1
+  satietyDecayPerHour: 10
+  happinessDecayPerHour: 5
+  excitementDecayPerHour: 60
+  maxOfflineDecayHours: 24
+  satietyHungryThreshold: 30
+  satietyExhaustedThreshold: 10
+  happinessSadThreshold: 30
+  happinessDepressedThreshold: 10
+  valueMin: 0
+  valueMax: 100
+  pointsInitial: 500
+  pointsCheckinReward: 100
+  pointsLevelUpReward: 100
+  pointsAdReward: 100
+  pointsAdDailyLimit: 5
+  pointsPersonalityChangeCost: 200

@@ -21,6 +21,14 @@ namespace PetV1.Pet
         public PetPersonality Personality;
         public PetEmotion Emotion;
 
+        /// <summary>
+        /// 服务端权威的养成状态（饱腹 / 快乐 / 等级 / 经验）。
+        /// **只读镜像**，客户端不得自行增减，见 PetStats 注释。
+        /// 行为决策可以读它（例如饥饿时提高觅食行为权重），
+        /// 但数值变化一律来自云函数返回。
+        /// </summary>
+        public PetStats Stats;
+
         // ---- 环境与时间 ----
         public float TimeSinceInteraction;
         public float DistanceFromHome;
@@ -44,9 +52,10 @@ namespace PetV1.Pet
         /// <summary>DebugPanel 一行摘要。</summary>
         public string Compact()
         {
+            string stats = Stats != null ? Stats.Compact() : "stats=未接入";
             return $"state={State} behavior={CurrentBehavior} " +
                    $"idle={TimeSinceInteraction:F1}s fromHome={DistanceFromHome:F2}m " +
-                   $"stuck={(IsStuck ? "Y" : "N")}";
+                   $"stuck={(IsStuck ? "Y" : "N")} {stats}";
         }
     }
 }

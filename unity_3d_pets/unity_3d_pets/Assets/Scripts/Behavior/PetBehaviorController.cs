@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using PetV1.Animation;
 using PetV1.Core;
+using PetV1.Data;
 using PetV1.Interaction;
 using UnityEngine;
 
@@ -36,6 +37,12 @@ namespace PetV1.Behavior
         [Tooltip("勾选后每次启动生成不同的个体性格。取消则固定使用品种值，便于 A/B 对比。")]
         [SerializeField] private bool randomizeIndividual = true;
 
+        [Header("Server Config")]
+        [Tooltip("后台下发的「互动产出」配置。留空则用 InteractionRewardConfig.Fallback()。\n"
+               + "注意：这里只用来查「某手势对应多少数值」做提示与埋点，\n"
+               + "真正的增减一律走服务端 feedPet，客户端不加算。")]
+        [SerializeField] private InteractionRewardConfig rewardConfig;
+
         [Header("Autonomous Behavior")]
         [SerializeField] private AutonomousBehaviorDriver.Config autonomousConfig = new AutonomousBehaviorDriver.Config();
 
@@ -60,6 +67,8 @@ namespace PetV1.Behavior
         private BehaviorBlackboard _blackboard = new BehaviorBlackboard();
         private UtilityScorer _scorer = new UtilityScorer();
         private AutonomousBehaviorDriver _autonomous;
+        private InteractionRewardConfig _rewardConfig;
+        private PetStats _stats;
 
         private BehaviorPriority _currentPriority = BehaviorPriority.P5_AutonomousIdle;
         private float _behaviorStartTime;
@@ -67,6 +76,61 @@ namespace PetV1.Behavior
         private GestureEvent _lastGesture;
         private string _lastEventLabel = "-";
         private float _timeSinceInteraction;
+
+        /// <summary>
+        /// 从 Resources 目录读包内默认配置。
+        /// 约定把后台下发的兜底配置放在
+        /// <c>Assets/Resources/PetV1/DefaultInteractionReward.asset</c>。
+        /// 读不到返回 null，由调用方退回 <c>InteractionRewardConfig.Fallback()</c>。
+        /// </summary>
+        private static InteractionRewardConfig LoadRewardConfig()
+        {
+            return Resources.Load<InteractionRewardConfig>(
+                "PetV1/DefaultInteractionReward");
+        }
+
+        /// <summary>
+        /// 服务端 getConfig 成功后调用，用下发配置覆盖包内默认值。
+        /// 这是唯一允许替换 _rewardConfig 的入口，避免多处持有不同实例。
+        /// </summary>
+        public void ApplyServerConfig(InteractionRewardConfig cfg)
+        {
+            if (cfg == null) return;
+            _rewardConfig = cfg;
+            if (_emotion != null) _emotion.ApplyConfig(cfg);
+            PetLog.Verb(PetLogChannel.System, "interaction reward config applied",
+                        "source", "server",
+                        "entries", (cfg.entries?.Count ?? 0).ToString());
+        }
+
+        /// <summary>当前生效的互动产出配置（只读）。UI 与埋点可读，用于显示预测值。</summary>
+        public InteractionRewardConfig RewardConfig => _rewardConfig;
+
+        /// <summary>
+        /// 服务端权威的养成状态（只读镜像）。UI 显示饱腹/快乐/经验/等级从这里读。
+        /// 想改数值必须调 <see cref="ApplyServerStats"/>，不要直接改字段。
+        /// </summary>
+        public PetStats Stats => _stats;
+
+        /// <summary>
+        /// 用云函数返回的权威数据覆盖本地缓存。
+        /// 每次 login / syncState / feedPet 成功后调用。
+        /// 这是客户端更新养成数值的**唯一**入口。
+        /// </summary>
+        public void ApplyServerStats(int satiety, int happiness, int level,
+                                     int expInLevel, int expToNextLevel, int totalExp)
+        {
+            if (_stats == null) return;
+            int min = _rewardConfig != null ? _rewardConfig.valueMin : 0;
+            int max = _rewardConfig != null ? _rewardConfig.valueMax : 100;
+            _stats.ApplyServerState(satiety, happiness, level,
+                                    expInLevel, expToNextLevel, totalExp, min, max);
+            PetLog.Verb(PetLogChannel.System, "stats synced from server",
+                PetLog.Kv("satiety", _stats.satiety,
+                          "happiness", _stats.happiness,
+                          "level", _stats.level,
+                          "exp", _stats.expInLevel + "/" + _stats.expToNextLevel));
+        }
 
         /// <summary>状态切换事件（DebugPanel / VFX 挂钩）。</summary>
         public event Action<PetState, PetState> StateChanged;
@@ -106,11 +170,23 @@ namespace PetV1.Behavior
             _emotion = new PetEmotion();
             _stateMachine = new PetStateMachine();
             _autonomous = new AutonomousBehaviorDriver(autonomousConfig);
+            _stats = new PetStats();
+
+            // 配置三层兜底（后台文档 6.5）：服务端下发 -> 包内 asset -> 内置常量。
+            //
+            // 注意：ScriptableObject **不是场景对象**，
+            // FindAnyObjectByType 对它无效（早先写成那样会永远返回 null
+            // 然后静默退回 Fallback，线上配了也不生效）。
+            // 必须走 Resources.Load 或 AssetDatabase。
+            if (rewardConfig == null) rewardConfig = LoadRewardConfig();
+            _rewardConfig = rewardConfig != null ? rewardConfig : InteractionRewardConfig.Fallback();
+            _emotion.ApplyConfig(_rewardConfig);
 
             _context = new PetContext
             {
                 Personality = _personality,
                 Emotion = _emotion,
+                Stats = _stats,
                 Controller = petController,
                 Animator = animationOrchestrator,
                 CurrentBehavior = PetBehavior.Idle,
@@ -536,43 +612,72 @@ namespace PetV1.Behavior
                 PetLog.Kv("gesture", ev.gesture, "region", ev.targetRegion, "duration", interactDuration));
         }
 
+        /// <summary>
+        /// 手势 -> 表现层情绪。
+        ///
+        /// 这里**只动** excitement / sleepiness 两个不入库的临时量，
+        /// 用来驱动行为决策（要不要跑、要不要扑）。
+        ///
+        /// 养成数值（happiness / satiety / exp）**不在这里加算** ——
+        /// 那三个是服务端权威值，见 PetStats。
+        /// 早先这里按手势调 ApplyTap(+2) / ApplyFastSweep(+5) 等方法，
+        /// 那些常量等于客户端自算养成值，改包即可刷，已移除。
+        /// 「某手势应该给多少」查 InteractionRewardConfig，只用于上报与提示。
+        /// </summary>
         private void UpdateEmotionFromGesture(GestureEvent ev)
         {
             switch (ev.gesture)
             {
-                case GestureType.Tap:
-                case GestureType.DoubleTap:
-                    _emotion.ApplyTap();
-                    break;
-                case GestureType.LongPress:
-                    _emotion.ApplyStroke(ev.durationMs / 1000f);
-                    break;
-                case GestureType.Stroke:
-                    _emotion.ApplyStroke(ev.durationMs / 1000f);
-                    break;
-                case GestureType.FastSwipe:
-                    _emotion.ApplyFastSweep(ev.averageSpeed);
-                    break;
-                case GestureType.MultiTap:
-                case GestureType.MultiHold:
-                    _emotion.ApplyMultiTouch(ev.fingerCount);
-                    break;
+                // 高强度：多指挠屏 / 扑屏，可触发 Excited、Run、Jump
                 case GestureType.MultiScratch:
                 case GestureType.ScreenScratch:
-                    _emotion.ApplyScreenScratch(Mathf.Clamp01(ev.averageSpeed / 1200f));
-                    break;
-                case GestureType.ScreenTap:
-                    _emotion.ApplyTap();
-                    break;
-                case GestureType.ScreenSwipe:
-                    _emotion.ApplyFastSweep(ev.averageSpeed);
-                    break;
                 case GestureType.ScreenMultiTouch:
-                    _emotion.ApplyMultiTouch(ev.fingerCount);
+                    _emotion.ApplyHighExcitement(Mathf.Clamp01(ev.averageSpeed / 1200f));
+                    break;
+
+                // 中等强度：快划，按速度给增益
+                case GestureType.FastSwipe:
+                case GestureType.ScreenSwipe:
+                    _emotion.ApplyInteraction(Mathf.Clamp01(ev.averageSpeed / 1200f));
+                    break;
+
+                // 抚摸：时长越长越兴奋，但有上限
+                case GestureType.Stroke:
+                case GestureType.LongPress:
+                    _emotion.ApplyInteraction(Mathf.Clamp01(ev.durationMs / 2000f));
+                    break;
+
+                // 轻触：固定小增益
+                case GestureType.Tap:
+                case GestureType.DoubleTap:
+                case GestureType.MultiTap:
+                case GestureType.MultiHold:
+                case GestureType.ScreenTap:
+                default:
+                    _emotion.ApplyInteraction(0f);
                     break;
             }
+
+            // 养成数值的预测值仅用于日志与埋点，真正增减由服务端 feedPet 结算。
+            // 合并进下面这条日志，不要每次手势打两条。
+            int predictedHappy = 0;
+            int predictedExpEvery = 0;
+            if (_rewardConfig != null)
+            {
+                var reward = _rewardConfig.Find(ev.gesture);
+                if (reward != null && reward.enabled)
+                {
+                    predictedHappy = reward.happinessDelta;
+                    predictedExpEvery = reward.expPerCount;
+                }
+            }
+
             PetLog.Emotion("updated",
-                PetLog.Kv("gesture", ev.gesture, "happy", _emotion.happiness, "excite", _emotion.excitement));
+                PetLog.Kv("gesture", ev.gesture,
+                          "excite", _emotion.excitement,
+                          "sleepy", _emotion.sleepiness,
+                          "predHappy", predictedHappy,
+                          "predExpEvery", predictedExpEvery));
         }
 
         private PetBehavior ChooseInteractionBehavior(GestureEvent ev, float drive)
