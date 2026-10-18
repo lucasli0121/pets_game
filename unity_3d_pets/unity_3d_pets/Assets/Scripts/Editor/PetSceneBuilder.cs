@@ -6,6 +6,7 @@ using PetV1.Behavior;
 using PetV1.Core;
 using PetV1.Diagnostics;
 using PetV1.Interaction;
+using PetV1.Model;
 using PetV1.Pet;
 using PetV1.UI;
 using UnityEditor;
@@ -455,73 +456,141 @@ namespace PetV1.EditorTools
         /// 整体一个 Capsule 作为 Body，再按骨骼加头部与背部球体，
         /// 让射线能区分 HEAD / BODY。腿部先不做，等真实模型骨骼确认后再加。
         /// </summary>
-        internal static void SetupRegionColliders(PetController pet, Transform rigRoot)
+        internal static void SetupRegionColliders(PetController pet, Transform rigRoot,
+            PetModelProfile profile = null)
         {
+            profile = profile != null ? profile : PetModelProfile.Fallback();
+
+            // 体型/转向/活动区参数从 profile 注入 —— 换模型只需改 profile，
+            // 不用回来翻这些数值
+            if (pet != null) pet.ApplyModelProfile(profile);
+
             // 宠物碰撞体放独立的 Pet 层，触摸射线只测这一层。
-            // 全放 Default 层时射线（mask=~0）会先打到墙 / 地板，
+            // 全放Default 层时射线（mask=~0）会先打到墙 / 地板，
             // 导致「点到墙上也算点到了狗」。
             int petLayer = PetLayerIndex();
             if (petLayer < 0) petLayer = 0;
 
-            // 整体身体
+            // 整体包围盒：比例分区的基准。按**蒙皮网格**的实际 bounds算，
+            // 不用 Collider —— 此时还没建 Collider。
+            var renderers = pet.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length == 0)
+            {
+                Debug.LogError("[PetV1] 宠物下没有任何 Renderer，无法建触摸分区。");
+                return;
+            }
+
+            // 关键：比例坐标是按**模型本地轴**定义的（头在 +Z、尾在 -Z），
+            // 所以必须用 localBounds 算，不能用 world bounds。
+            // 主场景里狗转了 180°，世界 bounds 的 +Z 实际是模型本地 -Z（尾巴侧），
+            // 两者混用会把尾巴摆到狗前面。
+            Bounds localBounds = renderers[0].localBounds;
+            foreach (var r in renderers) localBounds.Encapsulate(r.localBounds);
+
+            // 归一化比例 -> 模型本地坐标
+            Vector3 headLocal = profile.RatioToWorld(localBounds, profile.head.center);
+            Vector3 backLocal = profile.RatioToWorld(localBounds, profile.back.center);
+            Vector3 tailLocal = profile.RatioToWorld(localBounds, profile.tail.center);
+
+            
+            
+            
+
+            float h = Mathf.Max(profile.bodyHeight, 0.01f);
+
+            // ---- 整体 Body：沿模型长轴的胶囊 ----
             var body = new GameObject("Collider_Body");
             body.layer = petLayer;
             body.transform.SetParent(rigRoot, false);
-            body.transform.localPosition = new Vector3(0f, DogHeight * 0.55f, 0f);
+            body.transform.localPosition = new Vector3(0f, h * 0.5f, 0f);
             var bodyCollider = body.AddComponent<CapsuleCollider>();
-            bodyCollider.direction = 2;              // 沿 Z轴
-            bodyCollider.radius = 0.22f;
-            bodyCollider.height = 0.75f;
+            bodyCollider.direction = 2;              // 沿 Z 轴
+            bodyCollider.radius = Mathf.Max(0.05f, profile.bodyWidth * 0.5f);
+            bodyCollider.height = Mathf.Max(0.05f, profile.bodyLength);
             bodyCollider.center = Vector3.zero;
             var bodyTag = body.AddComponent<PetRegionCollider>();
             SetPrivateField(bodyTag, "region", PetRegion.Body);
 
-            // 头部：跟着 scull 骨骼走
-            Transform skull = FindDeep(rigRoot, "scull");
+            // ---- 头部 ----
+            // 两级：配了骨骼名就跟随骨骼（精确，会跟头动），
+            // 找不到就按包围盒比例放一个球（永不失效，只是不会跟着头转）。
+            Transform skull = profile.FindBone(rigRoot, profile.headBone);
             if (skull != null)
             {
                 var head = new GameObject("Collider_Head");
                 head.layer = petLayer;
                 head.transform.SetParent(skull, false);
-                head.transform.localPosition = new Vector3(0f, 0.05f, 0.02f);
+                head.transform.localPosition = Vector3.zero;
                 var headCollider = head.AddComponent<SphereCollider>();
-                headCollider.radius = 0.14f;
+                headCollider.radius = Mathf.Max(0.04f, h * 0.19f);
                 var headTag = head.AddComponent<PetRegionCollider>();
                 SetPrivateField(headTag, "region", PetRegion.Head);
+                Debug.Log($"[PetV1] 头部 Collider 跟随骨骼 '{profile.headBone}'。");
             }
             else
             {
-                // 找不到 scull 就退回整体 Body，保证触摸仍然可用
-                Debug.LogWarning("[PetV1] 未找到 scull 骨骼，头部 Collider 退回 Body。");
+                var head = new GameObject("Collider_Head");
+                head.layer = petLayer;
+                head.transform.SetParent(rigRoot, false);
+                head.transform.localPosition = headLocal;
+                var headCollider = head.AddComponent<SphereCollider>();
+                headCollider.radius = Mathf.Max(0.04f, profile.RatioToRadius(localBounds, profile.head.radius));
+                var headTag = head.AddComponent<PetRegionCollider>();
+                SetPrivateField(headTag, "region", PetRegion.Head);
+                Debug.LogWarning($"[PetV1] 未找到骨骼 '{profile.headBone}'，头部 Collider 退回包围盒比例" +
+                                 $"（本地位置 {headLocal:F2}，不随骨骼运动）。换模型请在 PetModelProfile 里填真实骨骼名。");
             }
 
-            // 背部：spine.004 附近
-            Transform spine = FindDeep(rigRoot, "spine.004");
+            // ---- 背部 ----
+            Transform spine = profile.FindBone(rigRoot, profile.backBone);
+            var back = new GameObject("Collider_Back");
+            back.layer = petLayer;
             if (spine != null)
             {
-                var back = new GameObject("Collider_Back");
-                back.layer = petLayer;
                 back.transform.SetParent(spine, false);
-                var backCollider = back.AddComponent<BoxCollider>();
-                backCollider.size = new Vector3(0.28f, 0.12f, 0.5f);
-                backCollider.center = new Vector3(0f, 0.14f, 0f);
-                var backTag = back.AddComponent<PetRegionCollider>();
-                SetPrivateField(backTag, "region", PetRegion.Back);
+                back.transform.localPosition = new Vector3(0f, h * 0.18f, 0f);
             }
+            else
+            {
+                // 用 localPosition 而非 position —— 与 profile 的本地坐标系保持一致，
+                // 避免 SetParent 之后再赋世界位置这种混用（见上方注释）。
+                back.transform.SetParent(rigRoot, false);
+                back.transform.localPosition = backLocal;
+            }
+            var backCollider = back.AddComponent<BoxCollider>();
+            backCollider.size = new Vector3(profile.bodyWidth * 0.67f, h * 0.16f, profile.bodyLength * 0.39f);
+            backCollider.center = Vector3.zero;
+            var backTag = back.AddComponent<PetRegionCollider>();
+            SetPrivateField(backTag, "region", PetRegion.Back);
+            if (spine == null)
+            {
+                Debug.LogWarning($"[PetV1] 未找到骨骼 '{profile.backBone}'，背部 Collider 按比例放置。");
+            }
+
+            // ---- 尾部（可选，没配骨骼就按比例）----
+            Transform tail = profile.FindBone(rigRoot, profile.tailBone);
+            var tailGo = new GameObject("Collider_Tail");
+            tailGo.layer = petLayer;
+            if (tail != null)
+            {
+                tailGo.transform.SetParent(tail, false);
+                tailGo.transform.localPosition = Vector3.zero;
+            }
+            else
+            {
+                tailGo.transform.SetParent(rigRoot, false);
+                tailGo.transform.localPosition = tailLocal;
+            }
+            var tailCollider = tailGo.AddComponent<SphereCollider>();
+            tailCollider.radius = Mathf.Max(0.03f, profile.RatioToRadius(localBounds, profile.tail.radius));
+            var tailTag = tailGo.AddComponent<PetRegionCollider>();
+            SetPrivateField(tailTag, "region", PetRegion.Tail);
 
             _ = pet;
-        }
 
-        private static Transform FindDeep(Transform root, string name)
-        {
-            if (root == null) return null;
-            foreach (Transform child in root)
-            {
-                if (child.name == name) return child;
-                var found = FindDeep(child, name);
-                if (found != null) return found;
-            }
-            return null;
+            Debug.Log($"[PetV1] 触摸分区已建立：Body/Head/Back/Tail，" +
+                      $"modelBounds={localBounds.size:F2}×{localBounds.size.y:F2}×{localBounds.size.z:F2} m，" +
+                      $"身高参数 {h:F2} m。");
         }
 
         internal static void WireBehavior(PetBehaviorController behavior, PetController pet,
@@ -862,7 +931,18 @@ namespace PetV1.EditorTools
                     prop.stringValue = value as string ?? "";
                     break;
                 case SerializedPropertyType.Enum:
-                    prop.enumValueIndex = value is int idx ? idx : 0;
+                    // 调用方传进来的是装箱的枚举（如 PetRegion.Body），
+                    // `value is int` 对装箱枚举**恒为 false** ——
+                    // 于是 prop.intValue 被赋0，分区全变Unknown，
+                    // 而且不报任何错，触摸仍能命中（因为判定的是
+                    // 有没有 PetRegionCollider，不是它的 region 值），
+                    // 只是「点头」和「点背」的行为完全一样。
+                    //
+                    // 用 Convert.ToInt32 而不是 enumValueIndex：
+                    // 后者是声明顺序索引，枚举有跳号或负值时会整体错位。
+                    prop.intValue = value is Enum en
+                        ? Convert.ToInt32(en)
+                        : (value is int idx ? idx : 0);
                     break;
                 case SerializedPropertyType.Vector2:
                     prop.vector2Value = (Vector2)value;

@@ -70,6 +70,26 @@ namespace PetV1.Pet
         /// <summary>碰撞体高度，用于把射线起点抬到身体中部。</summary>
         public float BodyHeight { get; set; } = 0.5f;
 
+        /// <summary>
+        /// 从 <c>PetModelProfile</c> 注入体型相关参数。
+        ///
+        /// 换模型后体型与步幅都不同，Collider 半径与转向速度必须同步，
+        /// 否则会出现「点击区域错位」或「转向像漂移」。
+        /// 由场景构建工具在生成场景时调用一次，不在运行期反复调。
+        ///
+        /// 注意：**不写 wanderBounds**。活动区是场景布局决定的（房间多大），
+        /// 场景构建器用 <see cref="SetWanderArea"/> 单独设，
+        /// 这里若也写会把调用方的设置覆盖掉。
+        /// </summary>
+        public void ApplyModelProfile(PetV1.Model.PetModelProfile profile)
+        {
+            if (profile == null) return;
+            BodyHeight = profile.bodyHeight;
+            turnSpeed = profile.turnSpeed;
+            Debug.Log($"[PetV1] PetController 应用模型参数：" +
+                      $"身高 {profile.bodyHeight:F2}m，转向 {profile.turnSpeed:F0}°/s");
+        }
+
         private void Awake()
         {
             _homePosition = transform.position;

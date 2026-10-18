@@ -94,8 +94,10 @@ namespace PetV1.EditorTools
             var scene = NewSceneInternal();
 
             var map = PetAnimationBuilder.LoadAnimationMap();
+            var profile = PetAnimationBuilder.LoadModelProfile();
             var pet = PetSceneBuilder.PlaceDog(dogPrefab, out Transform rigRoot);
-            pet.SetWanderArea(WanderArea, Vector2.zero);
+            // 活动区以 profile 为准（换模型时可调）。WanderArea 常量只作日志展示。
+            pet.SetWanderArea(new Vector2(profile.wanderHalfX, profile.wanderHalfZ), Vector2.zero);
 
             // 狗坐在地毯中央的蓝垫上，面向镜头（-Z）。
             pet.transform.position = new Vector3(0f, 0.026f, 0.35f);
@@ -121,7 +123,10 @@ namespace PetV1.EditorTools
                 PetSceneBuilder.SetPrivateField(touch, "petLayers", 1 << petLayer);
 
             // ---- 身体区域 Collider（Pet 层）----
-            PetSceneBuilder.SetupRegionColliders(pet, rigRoot);
+            // 骨骼名 / 体型 / 活动区全部从 PetModelProfile 读，换模型只改那个 asset。
+            // AssetDatabase 写操作已全部前置（见类注释的 fake null 说明），
+            // 这里加载是安全的。
+            PetSceneBuilder.SetupRegionColliders(pet, rigRoot, profile);
 
             // ---- 墙体与避障 ----
             // obstacleMask 指向 Walls 层，宠物会在墙前提前转向。
@@ -154,9 +159,12 @@ namespace PetV1.EditorTools
 
             Debug.Log("[PetV1] 主场景构建完成：\n" +
                       $"  {HomeScenePath}\n" +
-                      $"  空间 {RoomWidth} × {RoomDepth} × {WallHeight} m，活动区 ±{WanderArea.x} × ±{WanderArea.y} m\n" +
-                      $"  狗 0.42 × 0.76 × 1.27 m，朝向镜头（rotation 180°），占画面约 32%\n" +
-                      $"  相机 FOV {CamFov}，俯角 {CamPitch}°（对齐展板构图）\n" +
+                      $"  空间 {RoomWidth} × {RoomDepth} × {WallHeight} m，" +
+                      $"活动区 ±{profile.wanderHalfX:F2} × ±{profile.wanderHalfZ:F2} m\n" +
+                      $"  模型 {profile.bodyWidth:F2} × {profile.bodyHeight:F2} × {profile.bodyLength:F2} m" +
+                      $"（{PetAnimationBuilder.ModelProfilePath}），朝向镜头（rotation 180°）\n" +
+                      $"  速度 walk {profile.walkSpeed:F1} / run {profile.runSpeed:F1} m/s，转向 {profile.turnSpeed:F0}°/s\n" +
+                      $"  相机 FOV {CamFov}，俯角 {CamPitch}°\n" +
                       "本阶段未做 UI（顶部等级条 / 底部导航 / 食物训练入口 / 气泡提示）。\n" +
                       "打开该场景按 Play 即可看到狗在客厅里活动。");
         }

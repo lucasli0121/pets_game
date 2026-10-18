@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using PetV1.Animation;
 using PetV1.Core;
+using PetV1.Model;
 using PetV1.Pet;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -119,6 +120,30 @@ namespace PetV1.EditorTools
             AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
 
             return AssetDatabase.LoadAssetAtPath<PetPersonalityProfile>(path) ?? recreated;
+        }
+
+        /// <summary>模型描述资产路径。换模型时改这一个文件即可。</summary>
+        internal const string ModelProfilePath = "Assets/Animations/Dog/DogModelProfile.asset";
+
+        /// <summary>
+        /// 加载模型描述（骨骼名、体型、速度、活动区）。
+        /// 找不到就按当前免费模型的实测值现场建一个并落盘 ——
+        /// 保证「换模型后忘了填 profile」时场景仍能构建出来。
+        /// </summary>
+        public static PetModelProfile LoadModelProfile()
+        {
+            EnsureFolder("Assets/Animations", "Dog");
+
+            var typed = AssetDatabase.LoadAssetAtPath<PetModelProfile>(ModelProfilePath);
+            if (typed != null) return typed;
+
+            Debug.LogWarning($"[PetV1] 找不到模型描述 {ModelProfilePath}，用内置默认值重建。" +
+                             "换模型后请在 asset 里填真实骨骼名与体型。");
+            var created = ScriptableObject.CreateInstance<PetModelProfile>();
+            AssetDatabase.CreateAsset(created, ModelProfilePath);
+            AssetDatabase.SaveAssets();
+            AssetDatabase.ImportAsset(ModelProfilePath, ImportAssetOptions.ForceUpdate);
+            return AssetDatabase.LoadAssetAtPath<PetModelProfile>(ModelProfilePath) ?? created;
         }
 
         [MenuItem("Pet V1/1. Build Animation Assets", false, 1)]

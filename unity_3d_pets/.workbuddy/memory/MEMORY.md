@@ -130,6 +130,26 @@ SO 不是场景对象，这个调用永远返回 null，然后静默退回兜底
 `EnsureLayerExists("Walls", 8)` 改 `TagManager.asset`，用户层起点是第 8 层（0-7 内置）。
 `ConfigureObstacleMask` 把 `1 << layer` 写进 `PetController.obstacleMask`。
 
+### 11b. 换模型只改 `DogModelProfile.asset`
+PRD 4.1 PET-04「模型可替换」在工程上落在这里：
+`Assets/Animations/Dog/DogModelProfile.asset`（`PetModelProfile` 类），
+含骨骼名、体型、速度、活动区、区域比例。加载走
+`PetAnimationBuilder.LoadModelProfile()`。
+
+触摸分区两级：配了骨骼名就跟随骨骼，否则退回包围盒比例（永不失效）。
+Collider 半径从体型自动算，换模型不用手改数值。
+
+比例分区的归一化坐标范围是 **0~1**，`z=0.5` 是身体中点、`>0.5` 才是头侧。
+且必须用 `Renderer.localBounds` + `localPosition`——
+狗转了 180° 时世界 bounds 的轴向与模型本地轴相反，混用会把尾巴摆到狗前面。
+
+### 11c. `SetPrivateField` 传装箱枚举会静默失效
+`value is int` 对装箱的 `PetRegion.Body` 恒为 false，
+于是字段被赋 0 —— 所有触摸分区变 `Unknown`，不报错、触摸照常命中，
+只是头/背/尾行为完全一样。
+修法：`value is Enum en ? Convert.ToInt32(en) : ...`。
+**不要用 `enumValueIndex`**（那是声明顺序索引，枚举跳号就整体错位）。
+
 ### 12. Dog_001.prefab 自带 demo 组件，实例化时必须剥离
 `MovePlayerInput`（每帧调旧版 Input，必崩）+ `CreatureMover`（每帧写 Animator 参数，
 和 `AnimationOrchestrator` 抢同一个 Animator）。
