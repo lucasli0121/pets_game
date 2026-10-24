@@ -15,15 +15,15 @@ MonoBehaviour:
   modelId: AnimalsFree_Dog_001
   entries:
   - capability: 0
-    clip: {fileID: 7400000, guid: a4264bc0bb984c04398c4e1660c6fef3, type: 2}
+    clip: {fileID: 7400000, guid: 98811c260f3256047af87cc0f3c17177, type: 2}
     locomotionSpeed: 0
     rootMotion: 0
   - capability: 1
-    clip: {fileID: 7400000, guid: 13b134f6527625246bd2b6a4f6579751, type: 2}
+    clip: {fileID: 7400000, guid: c044103d651e0624e895d5a883b76664, type: 2}
     locomotionSpeed: 1.2
     rootMotion: 0
   - capability: 2
-    clip: {fileID: 7400000, guid: d0f2d70ea29c839449a45c617f4f8f30, type: 2}
+    clip: {fileID: 7400000, guid: 369dc9ac1dd509340a31c85532a7530c, type: 2}
     locomotionSpeed: 3
     rootMotion: 0
   defaultWalkSpeed: 1.2

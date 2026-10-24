@@ -30,9 +30,19 @@ Shader "PetV1/FakeShadow"
         {
             Name "FakeShadowUnlit"
             Blend SrcAlpha OneMinusSrcAlpha
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Cull Back
+ZWrite [_ZWrite]
+ ZTest [_ZTest]
+      // 必须 Cull Off，不能 Cull Back。
+            //
+      // 阴影 quad 被 Euler(90, petY, 0) 放平在地面上，
+      // 而 mesh 的法线是 Vector3.back（本地 -Z）。
+      // 转90° 之后法线朝**下**，相机在斜上方俯视，
+      // 看到的就是背面 —— Cull Back 会整片剔掉，阴影完全不可见。
+        //
+            // 这里跟背景 quad 是同一类问题（背景那次也踩了）。
+      // 用 Cull Off 更稳：地面阴影是薄片，双面渲染没有副作用，
+      // 也不依赖绕序方向，阴影贴图转 90°/180° 都不会突然消失。
+            Cull Off
 
             HLSLPROGRAM
             #pragma vertex vert

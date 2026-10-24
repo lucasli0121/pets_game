@@ -42,6 +42,27 @@ namespace PetV1.EditorTools
         private const string RunSource = "Dog_001_run.anim";
 
         /// <summary>
+        /// 待机 Clip 要裁到的时长（秒）。只保留前 2.0 秒的稳定站立段。
+        ///
+        /// 为什么必须裁：源 <c>Dog_001_idle</c> 长达 9.63s，不是待机呼吸，
+        /// 而是「站立 2s → 低头嗅地（俯仰 -13°）→ 抬头」的完整大动作。
+        /// 用整段做默认待机会导致：
+        ///   ① 狗静止时头部大幅上下点头（实测俯仰跨度 31°）
+        ///   ② 与 Walk 切换时俯仰角从 -13° 跳到 +11°，跨度 24°
+        ///      → 视觉上就是「前腿高/屁股高」，像在漂浮
+        ///
+        /// 实测俯仰曲线（尾根 spine.004 → 头 scull 的连线与水平面的夹角）：
+        /// ```
+        /// 0.0~1.9s   +15~16°   稳定站立
+        /// 2.4s        +2°      开始低头
+        /// 2.9~4.3s    -13°     低头到几乎贴地
+        /// 5.8s        +16°     回到抬头
+        /// ```
+        /// 裁到 2.0s 时俯仰跨度仅 0.39°（15.3~15.7°），2.2s 就开始低头了。
+        /// </summary>
+        public const float IdleTrimSeconds = 2.0f;
+
+        /// <summary>
         /// 稳健加载 AnimationMap。
         ///
         /// 为什么不用 LoadAssetAtPath&lt;PetAnimationMap&gt;：
@@ -151,7 +172,8 @@ namespace PetV1.EditorTools
         {
             EnsureFolder("Assets/Animations", "Dog");
 
-            AnimationClip idle = CreateLoopingClip(IdleSource, "Dog_Idle");
+            // Idle 必须裁到IdleTrimSeconds：源 clip 是「站立→低头嗅地→抬头」大动作
+            AnimationClip idle = CreateLoopingClip(IdleSource, "Dog_Idle", IdleTrimSeconds);
             AnimationClip walk = CreateLoopingClip(WalkSource, "Dog_Walk");
             AnimationClip run = CreateLoopingClip(RunSource, "Dog_Run");
 
@@ -222,8 +244,12 @@ namespace PetV1.EditorTools
         /// 复制源 Clip 并开启循环。
         /// 源 .anim 的 m_AnimationClipSettings.m_LoopTime = 0，若不处理，
         /// Idle 播完会停在最后一帧、Walk 会走一步就卡住。
+        ///
+        /// <paramref name="trimToSeconds"/> &gt; 0 时把 Clip 裁到该时长
+        /// （用于剔除源 Idle 里的「低头嗅地」大动作，见 <see cref="IdleTrimSeconds"/>）。
         /// </summary>
-        private static AnimationClip CreateLoopingClip(string sourceFileName, string outputName)
+        private static AnimationClip CreateLoopingClip(string sourceFileName, string outputName,
+                                                      float trimToSeconds = 0f)
         {
             string sourcePath = $"{SourceAnimDir}/{sourceFileName}";
             var source = AssetDatabase.LoadAssetAtPath<AnimationClip>(sourcePath);
@@ -258,11 +284,47 @@ namespace PetV1.EditorTools
             settings.loopBlend = true;
             AnimationUtility.SetAnimationClipSettings(clip, settings);
             EditorUtility.SetDirty(clip);
+
+            // 裁时长：剔除源 Idle 里的「低头嗅地」大动作。
+            // 用 SetCurve 逐曲线截断，不能直接改 clip.length（只读）。
+            float originalLength = clip.length;
+            if (trimToSeconds > 0f && trimToSeconds < clip.length)
+            {
+                foreach (var binding in AnimationUtility.GetCurveBindings(clip))
+                {
+                    var curve = AnimationUtility.GetEditorCurve(clip, binding);
+                    if (curve == null || curve.length == 0) continue;
+
+                    var trimmed = new AnimationCurve();
+                    for (int i = 0; i < curve.length; i++)
+                    {
+                        if (curve.keys[i].time > trimToSeconds) break;
+                        trimmed.AddKey(curve.keys[i]);
+                    }
+                    // 该曲线在裁剪点之前没有任何 key（源clip 里少见，但根位移曲线可能这样）
+                    // -> 不能建空曲线，否则 Evaluate 报错、SetEditorCurve 抛异常
+                    if (trimmed.length == 0)
+                    {
+                        trimmed.AddKey(new Keyframe(trimToSeconds, curve.Evaluate(trimToSeconds)));
+                        AnimationUtility.SetEditorCurve(clip, binding, trimmed);
+                        continue;
+                    }
+
+                    // 裁剪后末值保持水平，否则循环回起点时会跳一下
+                    trimmed.AddKey(new Keyframe(trimToSeconds, trimmed.Evaluate(trimToSeconds)));
+                    AnimationUtility.SetEditorCurve(clip, binding, trimmed);
+                }
+                EditorUtility.SetDirty(clip);
+            }
+
             AssetDatabase.SaveAssets();
             AssetDatabase.ImportAsset(targetPath, ImportAssetOptions.ForceUpdate);
 
             clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(targetPath);
-            Debug.Log($"[PetV1] 生成循环 Clip：{outputName}  len={clip.length:F2}s  loop={clip.isLooping}");
+            Debug.Log($"[PetV1] 生成循环 Clip：{outputName}  len={clip.length:F2}s  loop={clip.isLooping}" +
+                      (trimToSeconds > 0f
+                          ? $"  （已从 {originalLength:F2}s 裁到 {trimToSeconds:F2}s）"
+                          : ""));
             return clip;
         }
 

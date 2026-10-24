@@ -1,279 +1,116 @@
 # 项目记忆：unity_3d_pets
 
-## 项目概况
-产品名**宠屋养成记**（微信小游戏简称「宠屋」，软著「宠屋养成记游戏软件 V1.0」）。
-Unity 6.6 + URP，当前用 ithappy Animals FREE 的 `Dog_001` 做架构验证。
+**宠屋养成记**（微信小游戏「宠屋」）。Unity 6.6(6000.6.4f1)+URP，ithappy `Dog_001` 做架构验证。
+工程路径 `unity_3d_pets/unity_3d_pets`。主场景 `Assets/Scenes/PetPrototype/PetHome.unity`，
+由 `PetHomeSceneBuilder` 生成（菜单 `Pet V1 / 3. Build Home Scene`，入口 `BuildHomeScene()`）。
 
-### 文档目录职责（2026-10-18 用户明确）
-- `C:/dening_project/pets_game/docs/` —— **全项目**需求与设计文档
-  （PRD、后台管理端需求、三端分发资质清单、设计展板、技术方案、启动清单）
-- `C:/dening_project/pets_game/unity_3d_pets/docs/` —— **只放前端 Unity 技术文档**
-  （当前：`V1_编译与验证报告.md`、`电子宠物APP_V1_代码实现说明.md`）
+**详细版全部在同目录 `NOTES-unity-3d-pets.md`（取景/背景/uGUI 布局/MCP 限制/环境限制的完整数据），
+按需查。逐日过程见 `2026-*.md`。**
 
-### V1 已锁定的产品口径（改代码前必读）
-- **形态**：微信小游戏 + 纯 IAA（激励视频），不申请版号，不接虚拟支付
-- **场景**：2D 背景图（1080×1920，≤500KB）+ 3D 宠物，**相机改正交投影**，
-  宠物脚下要有跟随移动的椭圆假阴影。禁止建完整 3D 房间（首包 4MB 装不下）
-- **模型**：Cartoon Dog - Border Collie（Red Deer, Asset Store 293098, 113 动画）。
-  骨骼命名与 Animals FREE 不同，`scull` / `spine.004` 硬编码会失效
-- **数据**：服务端权威。**文档里的养成数值全是示例，不是写死的计算**，
-  全部后台可配。后台 1.3 那条「客户端余额只能显示」同样适用于
-  快乐值/饱腹/经验 —— 客户端自加算等于给改包刷数值留后门
-- **两类情绪要分清**：`happiness`/`satiety`/`exp`/`points` 归服务端；
-  `excitement`/`sleepiness` 是客户端表现层临时量，不入库不同步，
-  但衰减系数仍从配置注入
-- **「点击 5 次 +1 经验」是计数型**（`expPerCount`），不是每次给 0.2。
-  浮点累加有精度漂移且不好幂等，服务端按 `(user_id, gesture_type)` 记次数
-- **积分**：初始 500 / 签到 100 天 / 升级 100 级 / 广告 100 次
-- **等级经验**：×1.5 递增取整，必须走 `config_level` 表，客户端不做等级计算
-- **合规红线**：不做抽奖/开箱/概率付费；文案不得出现「充值」「购买」「元」「¥」
-- **V1 砍掉**：语音互动、排泄动画、邀请/转发奖励、训练面板（留接口）
+## 口径（改代码前必读）
+微信小游戏 + 纯 IAA（激励视频），不接虚拟支付。场景 = 2D 背景图(1080×1920,≤500KB) + 3D 宠物
++ 正交相机 + 脚下假阴影，**禁止建完整 3D 房间**（首包 4MB 装不下）。
+数据服务端权威，文档数值全是示例且后台可配。合规红线：不做抽奖/开箱/概率付费，
+文案不得出现「充值/购买/元/¥」。
+**用户口径**：① 需求文档与后台接口为主，展板只是参考 ② 一切以后台为准 ③ 四个底导页全做完。
+④ **界面布局、图标显示、视觉方案必须先问用户再动手**（用户原话：「要及时问我，
+不能自己瞎猜乱搞一气，浪费时间又浪费积分」）。纯逻辑/接口/数据结构可自行决定。
+⑤ **相对位置类口径（「X 在 Y 和 Z 的几分之几处」）必须问清三件事：相对哪两个元素、
+从哪头数、对齐哪个点**。少一条就返工（积分胶囊位置已返工过一次）。
 
-## 验证方式（Unity MCP 已接入，2026-10-17）
+## 关键结论（最容易忘的三条）
+1. **构图基准是狗脚底线不是地板最远端**：`floorFarLine` 只作自检基准，
+   `dogGroundLine` 才是相机构图目标。拿踢脚线当目标 = 强迫狗站贴墙处。
+2. **横竖屏保护**：不能改画布根 sizeDelta（CanvasScaler 每帧覆写），内容挂进居中的
+   `SafeFrame`（恒 1080×1920），`matchWidthOrHeight` 由 `PetPortraitGuard` 按屏幕比例动态切。
+   写死 0 时横屏画布高度塌到 608，顶栏/底导/标题全叠字。
+3. **uGUI 不为隐藏层级跑布局**；且 `ForceRebuildLayoutImmediate(页面根)` 不够 ——
+   `ContentSizeFitter` 与 `VerticalLayoutGroup` 同挂一个物体时重建到那层就停。
+   用 `PetPageBase.RelayoutTree` 自顶向下逐个 force。
 
-**优先用 MCP，不要再靠读日志猜。** 之前八轮排查浪费在读 `Logs/Editor.log` 上。
+## 图标（独立美术资源，不是代码生成）
+10 张 PNG 在 `Assets/Resources/PetIcons/`（pet/food/shop/scene/gear/heart/star/paw/bowl/close），
+128×128 白底透明，源文件合计 3KB。`PetIcons.Get(name)` = `Resources.Load<Sprite>("PetIcons/"+name)`，
+`NewIcon` 建装饰性Image。公开 API 与旧 SDF 版一致，调用点无需改。
+**三个必守的约束**：
+① **图标必须是纯白 RGB + alpha 覆盖度** —— `Image.color` 逐通道相乘，白图标才能染主蓝/红/灰；
+彩图染色会变脏。换图时先确认这条。
+② **图标必须「alpha 质心在画布中心」** —— bbox 居中 ≠ 视觉居中。狗头/心形下部轻，
+质心天然偏上；不校正就是「图标看着没在中间」。切图脚本已按质心定位窗口。
+③ PNG 默认按 `Texture` 导入，`Resources.Load<Sprite>` 返回 **null 且不报错**，
+症状是图标位置一块洋红方块。新图/换图后跑菜单 **`Pet V1/6. Import Icons`**
+（`PetIconImporter`：Sprite/Single/PPU=100/AlphaIsTransparency/关mip/Clamp/Uncompressed）。
+改图标的美术资源后要跑一次。
 
-| MCP 工具 | 用途 |
-| --- | --- |
-| `Unity_RunCommand` | 直接读运行时字段、跑构建菜单、改场景 |
-| `Unity_GetConsoleLogs` | 读 Console（比 Editor.log 准，Play 模式的输出也能拿到） |
-| `Unity_SceneView_CaptureMultiAngleSceneView` | 四视角截图看场景布局 |
+**图标表重出流程**（生图 1 张表 → 本地切10 张，不额外调生图）：
+`IconPreview/cut_sheet.py`（源图写死在脚本常量里）→ 切 10 张 + 打印自检。
+`IconPreview/pnglib.py` 通用 PNG 读写。`IconPreview/measure_bias.py` 量单张质心偏移。
+`IconPreview/preview_sheet.py <图标目录> <输出> dark` 拼对比图肉眼验。
+**源图是「16px 棋盘格透明底」（两种灰 lum≈223/250 交替）+ 深灰图形（峰 lum≈92）**，
+不是纯色底 —— 按纯色底处理会切成铺满的脏底。正确流程：连通域去噪 →
+膨胀取羽化边 → 亮度反推 alpha → **窗口中心取质心**（`side = max(bw+2|dcx|, bh+2|dcy|)+12`）。
 
-约束（踩过才知道）：
-- 类名必须 `internal class CommandScript`，实现 `IRunCommand`
-- **禁止反射**（`System.Reflection.BindingFlags.*` 会被拦）
-- **禁止 `GetInstanceID()`** —— Unity 6 已废弃，编译失败（CS0619）
-- `result.Log` **不支持 `{0:F3}` 格式化**，会当字面量输出
-- 改完 C# 要先 `CompilationPipeline.RequestScriptCompilation()`，Unity 会中断 MCP，稍等恢复
-- 编辑器里 `LateUpdate`/`Update` 不跑，`QueuePlayerLoopUpdate()` 也不立即生效，
-  验证相机跟随之类要进 Play 模式
-- `cam.Render()` 离屏渲染在 URP 下出全白，别用它截图，用 SceneView 截图工具
+**验证生成物必须看文件本身，不能只看预览图**：预览图是派生文件，脚本失败时可能没被覆盖，
+会拿上一轮的旧图当「验证通过」（踩过：图标 alpha 全 0 却看着预览正常）。
+白图标在白底预览上看不见，`preview_sheet.py` 必须带 `dark` 参数。
+**缩放预览图本身也可能有合成 bug**（网格纹理）—— 拿不准就用 1:1 渲染验。
 
-## 关键工程约定
+## 静默失效（不报错不生效，靠读代码发现）
+- **`NewSolid` 的 `radius` 必须真正参与 sprite 生成**。9-slice 的 border 以 sprite
+  自身像素为单位、四角不缩放，所以共用一张 border=32 的图 ⇒ 所有控件圆角都是
+  32px（正方形像方角块、胶囊被拉扁）。走 `RoundedSpriteFor(radius)` 按半径缓存生成。
+  **圆角半径必须 ≤ 控件短边的一半**，否则上下圆角加起来超过高度，9-slice 中间
+  被压成负数、边缘鼓出来。
+- **`Fill()` 与定尺寸不能连用**：先 `sizeDelta = w*0.52` 再 `Fill()` 会铺满父物体，
+  图标顶到圆边（看起来就是「没居中」）。要居中就用 anchor 中心 + 定尺寸。
+- **UI 验收必须量 `rect.width` / `rect.height`，不能只验 `fillAmount` 和文本**。
+  踩过：`BuildBarRow` 里行用 `anchorMin=anchorMax=(0,1)` + `sizeDelta=(0,48)`
+  ⇒ 行宽恒 0，标题竖排、进度条 Track 宽 0 全不可见，而 fillAmount 数值全对。
+- **`NewProgressBar` 返回值 = Fill，`out` 参数 = Track 底槽**。把 out 当填充条用，
+  `fillAmount` 设到底槽上不起作用，屏幕上那条 Fill 停在工厂写死的 1f
+  → 症状「进度条满格但百分比很小」。三处已修（顶栏经验条 / 状态属性浮层 / BuildStateBar）
+- 非序列化私有字段运行期必为 null（`PetHomeUI` 的 `_pages`/`_tabButtons`/`_toast`）
+  → `Start()` 检测到空就 `DestroyImmediate` 清子节点后运行期自建。
+  **判据不能只看「射线命中」**——按钮会变色、页面却不切换
+- `[Serializable]` 普通类字段初始化器反序列化时不跑 → `[NonSerialized] Dictionary` 变空
+- `AssetDatabase` 写操作造成 fake null（`== null` 为真但 `??` 不触发）
+- `FindAnyObjectByType<T>()` 对 ScriptableObject 永远返回 null
+- **PNG 默认按 Texture 导入 → `Resources.Load<Sprite>` 返回 null 且不报错**，
+  症状是图标位置一块洋红方块。跑菜单 `Pet V1/6. Import Icons`
+- 背面剔除在光栅化阶段，`WorldToViewportPoint` 量不出来
+- **量 UI 位置只能用 `GetWorldCorners` 换算出的中心，不能用 `anchoredPosition`** ——
+  `anchoredPosition` 的含义随 pivot 变（pivot=(0,1) 时是顶边、(0,0.5) 时是中心），
+  拿它当中心会把两个 pivot 不同的元素比错方向（踩过：把「偏下 25px」算成「偏上 28px」，
+  还反过来质疑用户描述）。
+  且**查找必须限定在同一父节点子树内** —— 全图按名字 `Find` 会命中别的页面的同名
+  `Track`/`Value`，量到完全无关的数据。
+- **写格子定位前先确认 pivot 语义**：`anchorMin=anchorMax=(0,0)` + `pivot=(0.5,0)`
+  时 `anchoredPosition` 是**中心**（写 `slot*i` 而非 `slot*(i+0.5)` ⇒ 整排 Hit
+  左移半格，症状「点 A 选中 B」）；`pivot.x=0` 才是左边缘。
+- **均分宽度不要用硬编码常量**：底导 slot 写死 270×4=1080，但 SafeFrame 恒 1080 宽
+  而画布按屏幕缩放，导航条实测只有 1018 ⇒ 第 4 格溢出屏幕点不到。
+  要 `brt.rect.width / n`（构建时布局可能没跑，需 `slot <= 1f` 兜底）。
+- **改代码后必须重进 Play 才能验**：编辑器里跑的是重载前的旧 UI 实例。
+  **改了 UI 层级结构还要先重建场景**（菜单 `Pet V1/3. Build Home Scene`）——
+  `_pages` 非空时 `Start()` 不自建，拿到的是场景文件里的旧层级
 
-### 1. activeInputHandler = 1，只能用新 Input System
-旧版 `UnityEngine.Input.*` 会**抛 InvalidOperationException**（每帧抛）。
+## MCP 编译限制（老坑复发）
+- `Unity.AI.Image` 与 `UnityEngine.UI.Image` 冲突 → 一律写全限定名
+- `string.Join(",", arr)` 与超过 3 个 `{n}` 的 `result.Log` 都报 CS1503
+  （`IFormatProvider` 重载）→ 用 `StringBuilder` 手工拼串
 
-### 2. `EnhancedTouchSupport.Enable()` 会把鼠标也模拟成触摸
-同一次点击被 Touchscreen + Mouse 各上报一次，中间产生 `TouchPhase.Canceled`，
-手势被取消 —— 表现就是「点击没反应」。
-修法：`ProcessMouse` 开头 `if (Touchscreen.current != null) return;`
-（不能只判断 `primaryTouch.press.isPressed`，按下和抬起会走不同分支）
+## 环境限制（别重复踩）
+- **Play 会因 Game 窗口未聚焦被挂起**：`isPlaying=True` 但 `Time.frameCount` 不动。
+  验证业务逻辑用 `Button.onClick.Invoke()` + 读状态字段；视觉确认必须用户聚焦后手动进 Play
+- 挂起时 Canvas 从未渲染，`GraphicRaycaster` 返回 0 命中是**假信号**
+- 离线渲连续帧走不通（多张 PNG MD5 相同），单帧静态截图可用
+- `activeInputHandler=1`，只能用新 Input System。Editor 命名空间是 `PetV1.EditorTools`
+- **改完场景参数必须先退出 Play 再重建**（`NewScene` 在 Play 下抛）
 
-### 3. 源动画 Clip 的 loopTime = 0
-必须复制后用 `AnimationUtility.SetAnimationClipSettings` 打开 loopTime。
+## 后台接口（`pets_server`，均在 `/api/v1/` 下）
+`config/get`、`pet/feed`、`pet/interaction`、`pet/switch`、`pet/adopt`、`pet/personality`、
+`shop/buy`、`scene/unlock`、`scene/use`、`sync`、`login`、`checkin/claim`、
+`ad/reward`、`ad/impression`、`event/report`
 
-### 4. Dog_001 是 Generic Rig（无 Avatar）
-- `applyRootMotion = false`（否则 Root 骨骼位移和 PetController 打架）
-- 骨骼名：root bone 是 `Root`，头是 **`scull`**（拼写就是这样，不是 skull），背是 `spine`~`spine.008`
-- 实际尺寸：**0.42 × 0.76 × 1.27 m**（MCP 实测）
-- 34 根骨骼、1170 顶点，材质是 URP/Lit
-
-### 5. Animator 访问边界（需求文档第十二节）
-全工程只有 `AnimationOrchestrator` 能在运行期碰 Animator。
-用 Speed float 参数驱动（>0.1 进 Walk，>2.0 进 Run），不允许 `animator.Play("Walk")`。
-
-### 6. Editor 程序集里的 MonoBehaviour 不能进 Build
-会被挂进场景的组件放 runtime 程序集（本项目 `Assets/Scripts/Diagnostics/`）。
-
-### 7. MonoBehaviour / ScriptableObject 的类名必须与文件名一致（Unity 硬性要求）
-类在别的文件里时 `CreateInstance<T>()` 返回 **null**，
-Console 报 `No script asset for XXX`，`.asset` 里 `m_Script: {fileID: 0}`。
-本项目踩过 5 处，已全部拆开（`PetPersonalityProfile`、`PetModelTestDemo`、
-`PetPerformanceProbe`、`PetSceneInfo`、`PetRegionCollider`）。
-
-### 8. Unity fake null —— 最隐蔽的坑
-`AssetDatabase` 写操作（`CreateFolder`/`CreateAsset`/`SaveAssets`）会触发资产重导入，
-Unity 在过程中**销毁并重建 ScriptableObject 的 native 实例**。
-C# 引用还在，但 Unity 重载的 `== null` 为真，而 `??` 只检查真 null，**兜底不触发**。
-
-**场景构建的正确顺序**（`BuildAllScenes`）：
-```
-1. EnsureFolder / BuildFloorMaterial / CreateInvisibleMaterial / PrepareWallsLayer
-   <- 所有 AssetDatabase 写操作集中在这里
-2. 每个 Build*Scene 内部重新 LoadAnimationMap()
-3. WireOrchestrator / WireBehavior 写入引用
-4. CreateWanderWalls(layerIdx)   <- 纯 GameObject，不碰 AssetDatabase
-5. SaveScene
-```
-
-识别信号：「某个 null 检查通过了，但后面用起来是空的」。
-
-### 9. Editor 写引用的三种方式，只有一种可靠
-- ✅ `SetPrivateField`（`SerializedObject` + `ApplyModifiedProperties`）
-- ❌ 直接赋字段 —— Unity 不知道对象变脏，`SaveScene` 会丢掉改动
-- ⚠️ 对本帧新建未落盘的 GameObject 做引用写入，值会被静默丢弃
-
-写完必须**读回复核**（用独立的 `SerializedObject`）。
-
-### 10. `GetInstanceID()` 在 Unity 6 已废弃
-用 `GetEntityId()`，或干脆别用。出现在字典 key 里会直接编译失败（CS0619）。
-
-### 10b. 三个反复踩到的编译错
-- `PetLog.System(msg)` **只有单参重载**。带 kv 要写
-  `PetLog.Verb(PetLogChannel.System, msg, PetLog.Kv(...))`。已踩两次。
-- `const` 成员不能用实例引用访问（CS0176）：
-  `cfg.someConst` 不行，要写 `TypeName.someConst`。
-- MCP 脚本里 `CompilationPipeline` 有命名空间冲突（`Unity.CompilationPipeline` 也存在），
-  必须写全 `UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation()`。
-
-### 10c. `FindAnyObjectByType<T>()` 对 ScriptableObject 无效
-SO 不是场景对象，这个调用永远返回 null，然后静默退回兜底常量 ——
-**不报错、不生效，最难查**。必须 `Resources.Load<T>()`（约定放
-`Assets/Resources/PetV1/xxx.asset`）或 AssetDatabase。
-
-### 10c2. ScriptableObject 字段初始值只在首次 CreateInstance 时生效
-构建器里 `if (asset == null) CreateInstance()` —— asset 已存在就跳过创建，
-于是改代码里的默认值不生效，asset 里还是旧值。
-**凡是靠默认值生效的参数字段，每次构建都要显式赋值。**
-
-### 10c3. 改了相机 transform 后 `WorldToViewportPoint` 读的是旧矩阵
-算斜率会恒为 0（两次量的是同一个缓存矩阵）。
-必须 `cam.ResetWorldToCameraMatrix()` 刷新。
-`cam.worldToCameraMatrix` 是**只读属性**，直接赋值会 CS0200。
-
-### 10c4. `TextureImporterNPOTScale` 在 Unity 6 里没有 `ToNone`
-成员是 `None` / `ToNearest` / `ToLarger` / `ToSmaller`。
-NPOT 图（如 1080×1920）不设 `None` 会被缩放到 2 的幂附近，
-实测 1080×1920 变成 **1024×2048**，比例从 9:16 变成 1:2。
-
-### 10d. Editor 类的命名空间是 `PetV1.EditorTools`，不是 `PetV1.Editor`
-写 `PetV1.Editor.PetAnimationBuilder` 会报 CS0234 ——
-因为 `Editor` 这个标识符被命名空间自己占用了。
-
-### 11. Layers 由构建工具自动建
-`EnsureLayerExists("Walls", 8)` 改 `TagManager.asset`，用户层起点是第 8 层（0-7 内置）。
-`ConfigureObstacleMask` 把 `1 << layer` 写进 `PetController.obstacleMask`。
-
-### 11b. 换模型只改 `DogModelProfile.asset`
-PRD 4.1 PET-04「模型可替换」在工程上落在这里：
-`Assets/Animations/Dog/DogModelProfile.asset`（`PetModelProfile` 类），
-含骨骼名、体型、速度、活动区、区域比例。加载走
-`PetAnimationBuilder.LoadModelProfile()`。
-
-触摸分区两级：配了骨骼名就跟随骨骼，否则退回包围盒比例（永不失效）。
-Collider 半径从体型自动算，换模型不用手改数值。
-
-比例分区的归一化坐标范围是 **0~1**，`z=0.5` 是身体中点、`>0.5` 才是头侧。
-且必须用 `Renderer.localBounds` + `localPosition`——
-狗转了 180° 时世界 bounds 的轴向与模型本地轴相反，混用会把尾巴摆到狗前面。
-
-### 11c. `SetPrivateField` 传装箱枚举会静默失效
-`value is int` 对装箱的 `PetRegion.Body` 恒为 false，
-于是字段被赋 0 —— 所有触摸分区变 `Unknown`，不报错、触摸照常命中，
-只是头/背/尾行为完全一样。
-修法：`value is Enum en ? Convert.ToInt32(en) : ...`。
-**不要用 `enumValueIndex`**（那是声明顺序索引，枚举跳号就整体错位）。
-
-### 12. Dog_001.prefab 自带 demo 组件，实例化时必须剥离
-`MovePlayerInput`（每帧调旧版 Input，必崩）+ `CreatureMover`（每帧写 Animator 参数，
-和 `AnimationOrchestrator` 抢同一个 Animator）。
-
-销毁顺序有硬约束：`MovePlayerInput` 声明了
-`[RequireComponent(typeof(CreatureMover))]`，先销毁 CreatureMover 会被拒绝。
-用显式数组：MovePlayerInput → ThirdPersonCamera → PlayerCamera → CreatureMover。
-销毁前先全部 `enabled = false`。`CreatureMover` 的 RequireComponent 会留下
-`CharacterController`，要一并清掉（会跟 PetController 抢移动控制权）。
-
-按 `Namespace.StartsWith("ithappy.Animals_FREE")` + 类型名匹配，换资产包也能复用。
-**不要改资产里的 prefab。**
-
-### 13. 活动区、墙体、相机三者要匹配
-当前：活动区 ±2.2m，墙 ±3.0m，Floor 8m，相机 offset (0, 1.9, -4.2) FOV 42。
-
-### 14. 调试面板的引用为空 = 按钮静默失效
-`PetDebugPanel` 的按钮写成 `if (GUILayout.Button(...) && touchInputManager != null)`，
-引用为空时不报错也不响应。所以「点了没反应」要先查引用，
-不能只看代码逻辑对不对。
-
-`Awake` 里有 `FindAnyObjectByType` 兜底，但构建时显式写入更可靠。
-
-### 17. 编辑器层级辅助函数必须用 localPosition
-`SetParent(parent, true)` + `transform.position = pos` 会把局部偏移当世界坐标。
-父节点在原点时碰巧正确，父节点一离开原点就全错 ——
-本项目就让绿植的叶片全跑到世界原点、正好压在狗身上，
-而自动遮挡自检因为「只看狗身后」这条过滤规则报了假通过。
-
-约定：`SetParent(parent, false)` + `localPosition` / `localScale`。
-写完用 MCP dump 子物体的 `world` 和 `local`，不要只看父节点位置。
-
-### 18. 遮挡自检用屏幕空间，不用世界距离
-`VerifyNoOcclusion` 现在的判据：把Renderer 包围盒 8 个角
-`WorldToScreenPoint` 取屏幕外接矩形，`rect.Overlaps(petRect)` 且
-`bounds.center.z < dogDepth` 才算遮挡。
-
-不要退回「中心到相机→狗连线的水平距离」那套 —— 它需要先假设
-物体在狗身后才能算，而物体放错位置时正是这个假设不成立。
-
-## 已实现的行为时序陷阱（改动时注意）
-1. `BehaviorAction.maxDuration = 0` 表示由决策随机决定长度，
-   所以**不能只用 maxDuration 判行为结束**，必须同时看 `PetStateMachine.PlannedDuration`
-2. `ExecuteBehavior` 遇到相同 behavior 不能直接 return，要重新掷时长
-3. 每次决策后要设 `_decisionCooldown`
-4. 行为结束后**不要**在 FinishCurrentBehavior 里写死回到 Idle
-5. 转向用 `Quaternion.RotateTowards`（只处理 Y 轴），不要混用 Slerp + 欧拉角 MoveTowards
-
-## 架构（已实现）
-- `PetV1.Runtime` / `PetV1.Editor` 两个 asmdef
-- `GestureRecognizer` 是**纯 C#**（不依赖 MonoBehaviour），阈值在 `Config` 里可调
-- `PetAnimationMap` 是换模型的唯一改动点 + fallback 链（Bark→Jump→Sit→Run→Walk→Idle）
-- `PetBehaviorController` 是唯一决策入口；`PetController` 只管身体
-
-## 场景清单
-| 场景 | 路径 | 用途 |
-| --- | --- | --- |
-| **PetHome** | `Assets/Scenes/PetPrototype/PetHome.unity` | **主场景**，对照展板第 2 页 |
-| PetPrototype | 同目录 | 原型验证（触摸 + 自主行为） |
-| PerformanceTest | 同目录 | 性能探针 |
-| ModelTest | 同目录 | 模型/动画自检 |
-
-主场景由 `PetHomeSceneBuilder`（菜单 `Pet V1 / 3. Build Home Scene`）生成，
-已挂进 `BuildAllScenes` 末尾。空间构成对照展板：
-木地板 + 草地地毯 + 蓝垫 + 石板路 + 木框落地窗 + 窗台绿植 + 沙发 + 挂画。
-房间 5 × 4.5 × 2.2 m，相机 FOV 45 / 俯角 9° / 位置 (0, 0.62, -2.6)。
-
-**主场景未做 UI**（顶部等级条、底部导航、食物/训练入口、气泡提示），
-需要另开一轮，见需求文档 3.2。调试仍用 PetDebugPanel。
-
-### 15. 场景比例要按「狗在画面里占多少」倒推，不能照抄写实尺寸
-展板是写实室内，狗看着很大。换成 0.76m 高的低模狗后，
-第一版按写实比例用 9 × 7.5 × 3.2 m 的房间，截出来狗只有一个小点。
-改成 5 × 4.5 × 2.2 m 之后，狗占画面 32%，接近展板的 1/3。
-
-**验证方法**（MCP 可做，不用进 Play）：
-```csharp
-var s1 = cam.WorldToScreenPoint(bounds.center + Vector3.up * bounds.extents.y);
-var s2 = cam.WorldToScreenPoint(bounds.center - Vector3.up * bounds.extents.y);
-float pct = Mathf.Abs(s1.y - s2.y) / cam.pixelHeight * 100;   // 目标 ~33%
-```
-
-### 15d. 定构图位后必须做遮挡自检（用户截图才发现的）
-相机和狗都在 x=0 中轴上，任何放在狗**身后**的家具都会正对玩家把它挡住。
-第一版三盆绿植都在 x≈0，结果玩家只看到狗头从树冠后面冒出来。
-这类问题**从数字上算不出来**（距离/角度都在合理范围），
-只有看渲染画面才能发现 —— 而 `cam.Render()` 在 URP 下出全白，
-只能用 SceneView 截图工具。
-
-已在 `PetHomeSceneBuilder.VerifyNoOcclusion` 里做成构建时自动校验：
-从相机到狗中心连线段，算每个家具到该线段的水平距离，
-小于「家具半径 + 狗半宽 + 余量」就报 LogError。
-只检查狗身后、高于 0.35m 的物体（贴地的地毯/石板路不算）。
-
-**教训**：搭完场景先看渲染图，别只信坐标数字。
-
-### 16. 模型朝向要用骨骼判断，不要凭感觉
-我先按「默认朝 +Z」写，截图发现背对；改成不转，又发现还是不对。
-最后用 MCP 读 `scull`（头骨）骨骼坐标才定论：
-Dog_001 默认头在 **+Z** 侧，相机在 -Z，所以要转 **180°** 才是正面朝镜头。
-
-**教训**：朝向问题用骨骼位置判定，不要靠猜。
-
-## 操作入口
-Unity 菜单：
-- `Pet V1 / 1. Build Animation Assets`
-- `Pet V1 / 2. Build Scenes`（含主场景，四个一起建）
-- `Pet V1 / 3. Build Home Scene`（只建主场景）
-- `Pet V1 / Report Capabilities`
-
-有了 MCP 后可以直接 `Unity_RunCommand` 调 `PetSceneBuilder.BuildAllScenes()`
-或 `PetHomeSceneBuilder.BuildHomeScene()`，不用再让用户点窗口触发重编译。
+## 待接
+`shop/buy` 与 `pet/feed`（现在客户端本地扣库存是临时口径）；背景图 `sceneUrl` 下载器；换宠物模型。

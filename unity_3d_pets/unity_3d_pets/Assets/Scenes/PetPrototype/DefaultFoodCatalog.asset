@@ -1,0 +1,82 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f540845acd324932b0e131fbb2b8acfc, type: 3}
+  m_Name: DefaultFoodCatalog
+  m_EditorClassIdentifier: PetV1.Runtime::PetV1.Model.FoodCatalog
+  items:
+  - id: food_normal
+    name: "\u666E\u901A\u72D7\u7CAE"
+    category: 0
+    price: 5
+    satiety: 50
+    happiness: 0
+    exp: 5
+    iconKey: icon_food_normal
+    sort: 1
+    enabled: 1
+    minLevel: 1
+  - id: food_beef
+    name: "\u725B\u8089\u7F50\u5934"
+    category: 0
+    price: 10
+    satiety: 100
+    happiness: 10
+    exp: 10
+    iconKey: icon_food_beef
+    sort: 2
+    enabled: 1
+    minLevel: 1
+  - id: food_biscuit
+    name: "\u78E8\u7259\u997C\u5E72"
+    category: 1
+    price: 15
+    satiety: 5
+    happiness: 5
+    exp: 5
+    iconKey: icon_food_biscuit
+    sort: 3
+    enabled: 1
+    minLevel: 1
+  - id: food_chicken
+    name: "\u9E21\u80F8\u8089"
+    category: 1
+    price: 20
+    satiety: 5
+    happiness: 10
+    exp: 8
+    iconKey: icon_food_chicken
+    sort: 4
+    enabled: 1
+    minLevel: 1
+  - id: food_cake
+    name: "\u751F\u65E5\u86CB\u7CD5"
+    category: 2
+    price: 50
+    satiety: 30
+    happiness: 50
+    exp: 20
+    iconKey: icon_food_cake
+    sort: 5
+    enabled: 1
+    minLevel: 1
+  initialPoints: 500
+  initialItems:
+  - itemId: food_normal
+    count: 3
+  - itemId: food_beef
+    count: 2
+  - itemId: food_biscuit
+    count: 5
+  - itemId: food_chicken
+    count: 2
+  - itemId: food_cake
+    count: 1

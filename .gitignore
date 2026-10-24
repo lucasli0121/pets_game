@@ -52,3 +52,7 @@ crashlytics-build.properties
 
 # 资源中间产物（模型/贴图导入缓存）
 *.tmp
+
+# Go 后端编译产物
+pets_server/bin/
+

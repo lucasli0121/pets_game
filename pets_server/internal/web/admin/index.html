@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>宠屋养成记 · 管理后台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 登录 -->
+<div id="loginView" class="login-wrap">
+  <form class="login-card" id="loginForm">
+    <div class="login-brand">
+      <div class="logo">宠</div>
+      <div>
+        <h1>宠屋养成记</h1>
+        <p>管理后台 · V1</p>
+      </div>
+    </div>
+    <label>账号<input id="username" autocomplete="username" required></label>
+    <label>密码<input id="password" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary block" type="submit">登录</button>
+    <p class="hint" id="loginHint">默认账号 admin / admin，上线前必须用 ADMIN_INIT_PASSWORD 换掉。</p>
+  </form>
+</div>
+
+<!-- 主体 -->
+<div id="shell" class="shell hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo sm">宠</div>
+      <span>宠屋后台</span>
+    </div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <div id="who" class="who"></div>
+      <button class="btn ghost sm" id="logoutBtn">退出登录</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h2 id="pageTitle">配置 · 食品</h2>
+        <p class="sub" id="pageSub"></p>
+      </div>
+      <div class="topbar-actions" id="topActions"></div>
+    </header>
+    <div class="dirty-bar hidden" id="dirtyBar">
+      <span>草稿有未发布的改动</span>
+      <div class="row">
+        <button class="btn ghost sm" id="diffBtn">查看改动</button>
+        <button class="btn primary sm" id="publishBtn">发布</button>
+      </div>
+    </div>
+    <section id="view" class="view"></section>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <header>
+      <h3 id="modalTitle"></h3>
+      <button class="icon-btn" id="modalClose">×</button>
+    </header>
+    <div id="modalBody" class="modal-body"></div>
+    <footer id="modalFoot"></footer>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -43,9 +43,18 @@ namespace PetV1.Pet
         [Tooltip("狗本体，用于挂假阴影。")]
         [SerializeField] private Transform petRoot;
 
-        [Header("Ground")]
-        [Tooltip("地面高度（Y）。宠物与假阴影都以此为基准。")]
-        [SerializeField] private float groundY = 0f;
+        [Header("相机（按场景构图数据点重摆）")]
+        [Tooltip("正交相机。切场景时要按新场景的 layout 重设 orthographicSize 与位置，" +
+                 "因为每张背景图的地面线不同。")]
+        [SerializeField] private Camera portraitCamera;
+
+        [Tooltip("狗脚底的世界 Y。相机反推高度时要用它的实测值，不能假设是 0 —— " +
+                 "模型 bounds.min.y 往往是 -0.01 这种小负值。")]
+        [SerializeField] private float groundWorldY = 0f;
+
+        // 原来这里有个 groundY 字段，但它从没被读过（CS0414）——
+        // 假阴影的高度基准存在 PetFakeShadow 自己的 _groundY 里，
+        // 由 Attach(pet, groundY) 注入。保留两份只会让人以为改这里能生效。
 
         /// <summary>场景切换完成事件。UI 订阅它刷新标题等。</summary>
         public event System.Action<PetSceneLibrary.SceneEntry> SceneChanged;
@@ -61,6 +70,13 @@ namespace PetV1.Pet
             library = lib;
             petRoot = pet;
             keyLight = light;
+        }
+
+        /// <summary>把相机与狗脚高度交给Stage，由它在切场景时重摆取景。</summary>
+        public void ConfigureCamera(Camera cam, float groundY)
+        {
+            portraitCamera = cam;
+            groundWorldY = groundY;
         }
 
         private void Start()
@@ -82,6 +98,7 @@ namespace PetV1.Pet
             }
 
             currentSceneId = sceneId;
+            var lay = entry.ResolveLayout();
 
             // 1. 换背景贴图
             if (backgroundRenderer != null && entry.background != null)
@@ -102,28 +119,77 @@ namespace PetV1.Pet
                     Debug.LogError("[PetV1] 背景 quad 缺材质，无法贴图。");
                 }
             }
+            else if (entry.background == null)
+            {
+                // 后台有这张场景但本地没图（sceneUrl 还没下载完）。
+                // 保持当前贴图，别把画面清空。
+                //
+                // 但要注意后果：下面第 1.6 步会**按这张场景的 layout 重摆相机与背景尺寸**，
+                // 而贴图还是上一张的。构图数据点与画面不匹配（户外 2.2 的可视范围
+                // 套在室内图上），画面会明显不对。所以必须喊一声，
+                // 否则症状是「切场景之后画面怪怪的」，查不到是缺图导致的。
+                Debug.LogWarning($"[PetV1] 场景 '{sceneId}' 的背景图尚未就位" +
+                                 (string.IsNullOrEmpty(entry.sceneUrl)
+                                     ? "（既无包内资源也无 sceneUrl）"
+                                     : $"（等待下载 {entry.sceneUrl}）") +
+                                 "，沿用当前背景。注意相机会按这张场景的构图数据点重摆，" +
+                                 "画面与图不匹配属预期，图片就位后重新切换即可。");
+            }
+
+            // 1.5 按这张图的实测数据点重摆相机。
+            //     必须做：每张背景图的地面线不同（home_day 0.433 / home_night 0.435 /
+            //     park_day 0.549），狗脚底线也不同。不重摆就会出现「切到公园狗悬空 /
+            //     切到夜晚狗陷进地板」。户外那张的可视范围还更大（2.2 vs 1.9）。
+            if (portraitCamera != null)
+            {
+                portraitCamera.orthographicSize = lay.orthographicSize;
+                portraitCamera.transform.rotation = Quaternion.Euler(-lay.cameraPitch, 0f, 0f);
+                portraitCamera.transform.position = lay.ComputeCameraPosition(groundWorldY);
+                Debug.Log($"[PetV1] 场景 '{sceneId}' 取景：orthoSize={lay.orthographicSize:F2}" +
+                          $"（可视高 {lay.orthographicSize * 2f:F2}m），俯角 {lay.cameraPitch:F0}°，" +
+                          $"狗脚线 {lay.dogGroundLine:P0}，地板最远端 {lay.floorFarLine:P0}");
+            }
+
+            // 1.6 背景 quad 尺寸必须跟着 orthographicSize 走。
+            //     quad 是挂在相机下的 1×1 面片，靠 localScale 放大，
+            //     尺寸在构建期按当时的 orthoSize 算死（宽 = 高 × 9/16，
+            //     高 = orthoSize × 2）。后台把 orthoSize 从 1.9 改成 2.2
+            //     （park_day 就是这个值）而不改这里，后果是背景比可视区小一圈，
+            //     画面上下露出 clearFlags 的纯色 —— 看着像「背景没铺满」，
+            //     但相机参数全是对的，从坐标上查不出来。
+            if (backgroundRenderer != null)
+            {
+                float h = lay.orthographicSize * 2f;
+                float w = h * (1080f / 1920f);
+                backgroundRenderer.transform.localScale = new Vector3(w, h, 1f);
+            }
 
             // 2. 主光跟随场景（三张背景图光源都在左上，所以方向一致，
             //    但颜色与强度必须换 —— 夜间场景背景是暗的，
             //    宠物若还按白天的亮度渲染会像贴纸浮在画面上）
             if (keyLight != null)
             {
-                keyLight.transform.rotation = Quaternion.Euler(entry.lightEuler);
-                keyLight.color = entry.lightColor;
-                keyLight.intensity = entry.shadowOpacity > 0f ? 1f : 1f;
+                keyLight.transform.rotation = Quaternion.Euler(lay.LightEuler);
+                keyLight.color = lay.LightColor;
             }
 
             // 3. 环境光
-            RenderSettings.ambientIntensity = entry.ambientIntensity;
+            RenderSettings.ambientIntensity = lay.ambientIntensity;
 
             // 4. 假阴影外观
             var shadow = petRoot != null ? petRoot.GetComponentInChildren<PetFakeShadow>(true) : null;
-            if (shadow != null) shadow.Configure(entry.shadowOpacity);
+            if (shadow != null) shadow.Configure(lay.shadowOpacity);
+
+            // 5. 活动区跟着场景变：户外的活动区比室内大（画面里没家具要避让）
+            var ctrl = petRoot != null ? petRoot.GetComponentInChildren<PetController>(true) : null;
+            if (ctrl != null) ctrl.SetWanderArea(lay.WanderHalf, lay.WanderCenter);
 
             SceneChanged?.Invoke(entry);
-            Debug.Log($"[PetV1] 场景 '{sceneId}'（{entry.displayNameKey}）已应用，" +
-                      $"光色 {entry.lightColor}，环境光 {entry.ambientIntensity:F2}，" +
-                      $"假阴影 {entry.shadowOpacity:F2}");
+            Debug.Log($"[PetV1] 场景 '{sceneId}'（{entry.displayName}）已应用，" +
+                      $"光色 {lay.LightColor}，环境光 {lay.ambientIntensity:F2}，" +
+                      $"假阴影 {lay.shadowOpacity:F2}，" +
+                      $"活动区 ±{lay.wanderHalfX:F2}×±{lay.wanderHalfZ:F2} m" +
+                      (string.IsNullOrEmpty(lay.layoutNote) ? "" : $"｜实测：{lay.layoutNote}"));
         }
 
         /// <summary>

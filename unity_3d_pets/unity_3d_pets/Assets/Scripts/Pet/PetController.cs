@@ -255,16 +255,30 @@ namespace PetV1.Pet
             return new Vector3(x, position.y, z);
         }
 
-        /// <summary>随机取一个活动区内的合法点。</summary>
-        public Vector3 GetRandomWanderPoint(float margin = 0.5f)
+/// <summary>随机取一个活动区内的合法点。</summary>
+        /// <param name="margin">
+        /// 距活动区边界的余量（米）。
+      /// **不能写死**：原来是固定 0.5f，而活动区半宽只有 0.55m，
+        /// 减完只剩 0.05m —— 目标点几乎都在原地，必然触发 stuck 检测，
+        /// 变成「转向 → 卡住 → 脱困 → 转向」的循环（实测日志里
+        /// stuck detected 反复出现就是这个原因）。
+    /// 现在按活动区尺寸取比例，保证任何尺寸下都留得下可走动的范围。
+        /// </param>
+     public Vector3 GetRandomWanderPoint(float margin = -1f)
         {
-            Vector3 center = _homePosition + new Vector3(wanderCenterOffset.x, 0f, wanderCenterOffset.y);
-            float usableX = Mathf.Max(0.2f, wanderBounds.x - margin);
-            float usableZ = Mathf.Max(0.2f, wanderBounds.y - margin);
-            return new Vector3(
-                center.x + Random.Range(-usableX, usableX),
-                center.y,
-                center.z + Random.Range(-usableZ, usableZ));
+          Vector3 center = _homePosition + new Vector3(wanderCenterOffset.x, 0f, wanderCenterOffset.y);
+            if (margin < 0f)
+        {
+        // 取活动区短边的 25%，上限 0.5m，下限 0.05m
+   float shortest = Mathf.Min(wanderBounds.x, wanderBounds.y);
+       margin = Mathf.Clamp(shortest * 0.25f, 0.05f, 0.5f);
+    }
+        float usableX = Mathf.Max(0.2f, wanderBounds.x - margin);
+    float usableZ = Mathf.Max(0.2f, wanderBounds.y - margin);
+       return new Vector3(
+       center.x + Random.Range(-usableX, usableX),
+         center.y,
+    center.z + Random.Range(-usableZ, usableZ));
         }
 
         private void UpdateStuckDetection(float deltaTime)

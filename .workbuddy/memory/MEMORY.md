@@ -42,7 +42,13 @@ LLM 控制每帧动画、社交/排行榜/公会、大量商城付费、为「AI
 - 24 个自写 C# 文件 / 5037 行；`Assets/Scripts/{Core,Pet,Animation,Interaction,Behavior,UI,Diagnostics,Editor}`
 - 三个场景 `Assets/Scenes/PetPrototype/`：ModelTest / PetPrototype / PerformanceTest
 - 已跑通：触摸→Gesture→Event→BehaviorController→AnimationOrchestrator→Animator；自主行为；4 维性格 + 3 维情绪参与打分
-- **未做**：语音、喂养、成长、本地存档、UI 页面
+- **未做**：语音、成长页数据接后台、本地存档
+- **2026-10-23 更新**：四个底导页 UI 已完成；**商城 + 喂食 + 场景解锁全部接后台**
+  （`config/get` 商品与场景 + `sync-state` 积分/背包/场景 + `shop/buy-food` + `pet/feed`
+  + `scene/unlock` + `scene/use`），登录用 devOpenid，离线降级到包内 asset 且禁用写操作。
+  场景背景图走 `sceneUrl` 下载 + `persistentDataPath/scene_assets` 缓存。
+  新用户赠送食品由后台 `config_points.initialItems` 配置（默认 3/2/5/2/1），管理端 A4 可改。
+  仍待接：`checkin/claim`、`ad/reward`、`ad/impression`。详见 `NOTES-unity-3d-pets.md`
 - 唯一允许触碰 Animator 的是 `AnimationOrchestrator`，且必须挂在狗本体 prefab 实例上
 
 ## 产品基线（2026-10-18 修订，PRD 为准）
