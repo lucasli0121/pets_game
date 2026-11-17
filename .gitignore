@@ -71,3 +71,14 @@ secrets/
 
 # 服务端实际配置（模板见 cfg/pets_server.yaml.example）
 pets_server/cfg/pets_server.yaml
+
+# ---- Unity 工程产物与第三方 SDK ----
+# 体积大或可重新生成，均从官方渠道获取，不入库
+unity_3d_pets/.cache/
+unity_3d_pets/.fontwork/
+unity_3d_pets/docs/ppt/
+unity_3d_pets/unity_3d_pets_2022/
+unity_3d_pets/unity_3d_pets/TextToolDatas/
+unity_3d_pets/unity_3d_pets/Data/
+unity_3d_pets/unity_3d_pets/Assets/WX-WASM-SDK-V2/
+unity_3d_pets/unity_3d_pets/Assets/WX-WASM-SDK-V2.meta
