@@ -200,6 +200,8 @@ func ValidateSnapshot(s *domain.ConfigSnapshot) error {
 		"tapHappiness": ic.TapHappiness, "petHappiness": ic.PetHappiness,
 		"scratchHappiness": ic.ScratchHappiness, "swipeHappiness": ic.SwipeHappiness,
 		"petExp": ic.PetExp, "scratchExp": ic.ScratchExp, "swipeExp": ic.SwipeExp,
+		"bgScratchHappiness": ic.BgScratchHappiness, "bgScratchExp": ic.BgScratchExp,
+		"bgSwipeHappiness": ic.BgSwipeHappiness, "bgSwipeExp": ic.BgSwipeExp,
 		"dailyExpCap": ic.DailyExpCap, "dailyHappinessCap": ic.DailyHappinessCap,
 	} {
 		if v < 0 {
@@ -208,6 +210,23 @@ func ValidateSnapshot(s *domain.ConfigSnapshot) error {
 	}
 	if ic.TapExpEvery <= 0 {
 		return domain.ErrParam("tapExpEvery 必须大于 0")
+	}
+
+	// 整份互动配置全 0：只可能来自「草稿里根本没有 interaction 节点」
+	// （比如用一份残缺的 JSON 覆盖了草稿）。放过去的后果是所有手势都不产出，
+	// 而响应里 capped=false，客户端完全看不出这是配置问题。
+	if ic == (domain.InteractionConfig{}) {
+		return domain.ErrParam("互动配置整段为空：请刷新管理页面后重新填写并保存。" +
+			"当前这份草稿里没有任何互动收益，发布出去玩家怎么互动都不会涨")
+	}
+
+	// 四项全 0 的拦截：这是「管理端页面还是旧缓存、把这几个字段当成不存在写回 0」的典型症状。
+	// 放过去的表现是玩家挠背景完全没有反馈，而表单里只是几个空输入框，运营看不出问题。
+	// 真要压低反馈，快乐给 1、经验留 0 即可；完全不结算不是设计上想要的档位。
+	if ic.BgScratchHappiness == 0 && ic.BgScratchExp == 0 &&
+		ic.BgSwipeHappiness == 0 && ic.BgSwipeExp == 0 {
+		return domain.ErrParam("背景手势收益不能全为 0：至少给 1 点快乐（经验可以留 0）。" +
+			"如果刚升级过服务端，先刷新管理页面再保存，旧页面会把这几项写成 0")
 	}
 	return nil
 }

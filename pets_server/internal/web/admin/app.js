@@ -526,10 +526,15 @@ RENDER.points = async (view) => {
           <div class="field"><label>多指挠动 经验 +</label>${numCell('interaction.scratchExp', it.scratchExp)}</div>
           <div class="field"><label>快速划动 快乐 +</label>${numCell('interaction.swipeHappiness', it.swipeHappiness)}</div>
           <div class="field"><label>快速划动 经验 +</label>${numCell('interaction.swipeExp', it.swipeExp)}</div>
+          <div class="field"><label>背景挠动 快乐 +</label>${numCell('interaction.bgScratchHappiness', it.bgScratchHappiness)}</div>
+          <div class="field"><label>背景挠动 经验 +</label>${numCell('interaction.bgScratchExp', it.bgScratchExp)}</div>
+          <div class="field"><label>背景划动 快乐 +</label>${numCell('interaction.bgSwipeHappiness', it.bgSwipeHappiness)}</div>
+          <div class="field"><label>背景划动 经验 +</label>${numCell('interaction.bgSwipeExp', it.bgSwipeExp)}</div>
           <div class="field"><label>每日互动经验上限</label>${numCell('interaction.dailyExpCap', it.dailyExpCap)}</div>
           <div class="field"><label>每日互动快乐上限</label>${numCell('interaction.dailyHappinessCap', it.dailyHappinessCap)}</div>
         </div>
-        <p class="hint" style="margin-top:12px">互动收益由服务端按手势与次数计算并做每日上限，客户端只上报手势，不上报数值。</p>
+        <p class="hint" style="margin-top:12px">互动收益由服务端按手势与次数计算并做每日上限，客户端只上报手势，不上报数值。
+          「背景」指手指没落在宠物身上的挠/划 —— 收益要比狗身上的低，否则在空白处来回蹭就能顶满每日上限。</p>
       </div>
     </div>
     <p class="hint">新用户赠送在整个「首次领养」里发放：先发初始积分（走流水留痕），再发这批食品。

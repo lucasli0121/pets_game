@@ -152,6 +152,13 @@ type PointsConfig struct {
 	HappinessSad       int `json:"happinessSad" bson:"happiness_sad"`             // 30
 	HappinessDepressed int `json:"happinessDepressed" bson:"happiness_depressed"` // 10
 
+	// 饱腹 / 快乐的数值上限（0 或未配置时按 100 处理）。
+	//
+	// 2026-10-30 之前这个上限写死在 pet.go 的三处 ClampState 与 decay.go 的衰减结算里，
+	// 想试「上限调到 120 会不会更耐玩」只能改代码重新发版，调参一轮就是一个版本。
+	// 抽成配置项后管理端改数字即可，衰减、喂食、互动三条加值路径统一走同一上限。
+	StateMax int `json:"stateMax" bson:"state_max"` // 100
+
 	// 衰减速率（文档 6.4 写死 10 / 5；文档未要求可配，但按「数值不进代码」原则一并放进配置）
 	SatietyDecayPerHour   int `json:"satietyDecayPerHour" bson:"satiety_decay_per_hour"`     // 10
 	HappinessDecayPerHour int `json:"happinessDecayPerHour" bson:"happiness_decay_per_hour"` // 5
@@ -161,8 +168,18 @@ type PointsConfig struct {
 	DailyProduceCap int `json:"dailyProduceCap" bson:"daily_produce_cap"`
 }
 
-// DefaultInitialItems 新用户赠送的默认清单。
+// StateCap 饱腹 / 快乐的数值上限。未配置（0）时按 100，与抽取配置项之前的行为一致。
 //
+// 用方法而不是在调用点各写一次 `if x <= 0 { x = 100 }`：加值与衰减两条路径
+// 必须用同一个上限，分开写早晚会有一处漏改，症状是「喂食能到 120、衰减却按 100 夹」。
+func (p PointsConfig) StateCap() int {
+	if p.StateMax > 0 {
+		return p.StateMax
+	}
+	return 100
+}
+
+// DefaultInitialItems 新用户赠送的默认清单。//
 // 取的是客户端原型期那份背包的量级（3/2/5/2/1），这样接上后台之后
 // 玩家看到的初始库存和之前一致，不会觉得「东西变少了」。
 // 运营可以在管理端 A4 页改，也可以整个清空（不送）。
@@ -210,9 +227,26 @@ type InteractionConfig struct {
 	ScratchExp       int `json:"scratchExp" bson:"scratch_exp"`             // 1
 	SwipeHappiness   int `json:"swipeHappiness" bson:"swipe_happiness"`     // 5
 	SwipeExp         int `json:"swipeExp" bson:"swipe_exp"`                 // 1
+
+	// 背景手势收益：手指没落在宠物身上（挠背景 / 划空白）。
+	//
+	// 收益刻意压到「只给一点快乐、不给经验」：玩家在整屏乱挠是常态，
+	// 判成 no-op 会让人以为互动不涨数值；但收益和狗身上一样就成了刷分漏洞，
+	// 手指在空白处来回蹭即可顶满每日上限。
+	BgScratchHappiness int `json:"bgScratchHappiness" bson:"bg_scratch_happiness"` // 1
+	BgScratchExp       int `json:"bgScratchExp" bson:"bg_scratch_exp"`             // 0
+	BgSwipeHappiness   int `json:"bgSwipeHappiness" bson:"bg_swipe_happiness"`     // 1
+	BgSwipeExp         int `json:"bgSwipeExp" bson:"bg_swipe_exp"`                 // 0
+
 	// 每日上限（防刷；0 = 不限制）
+	//
+	// DailyHappinessCap 产品决策（2026-10-30）：默认改为 0，不再限制每日快乐总量。
+	// 原因：这个额度按「服务端发出的数值」累计，而快乐本身又被 state_max 夹在 100，
+	// 满值后继续互动不会涨数值、额度却照扣，几十秒就能把当天额度烧光。
+	// 等快乐自然衰减回 85 时再互动，玩家会看到「没满却怎么挠都不涨」。
+	// 快乐不能兑换任何东西，这层防刷没有实际收益，去掉后只剩「快乐最高 100」一条规则。
 	DailyExpCap       int `json:"dailyExpCap" bson:"daily_exp_cap"`             // 100
-	DailyHappinessCap int `json:"dailyHappinessCap" bson:"daily_happiness_cap"` // 300
+	DailyHappinessCap int `json:"dailyHappinessCap" bson:"daily_happiness_cap"` // 0（不限）
 }
 
 // ============ 默认基线（文档 13.4 / PRD 附录 A） ============
@@ -311,6 +345,7 @@ func DefaultSnapshot() ConfigSnapshot {
 			HappinessDecayPerHour: 5,
 			OfflineCapHours:       24,
 			DailyProduceCap:       0,
+			StateMax:              100,
 		},
 		Ad: []AdItem{
 			{ID: "ad_rewarded_default", AdUnitID: "adunit-xxxxxxxxxxxx", AdType: AdTypeRewarded, Placement: "insufficient_points", Enabled: true, MinIntervalSec: 60, DailyLimit: 5, SkipFirstDay: false},
@@ -333,8 +368,14 @@ func DefaultSnapshot() ConfigSnapshot {
 			ScratchExp:        1,
 			SwipeHappiness:    5,
 			SwipeExp:          1,
+
+			BgScratchHappiness: 1,
+			BgScratchExp:       0,
+			BgSwipeHappiness:   1,
+			BgSwipeExp:         0,
+
 			DailyExpCap:       100,
-			DailyHappinessCap: 300,
+			DailyHappinessCap: 0, // 不限（见字段注释：额度会被满值白白消耗）
 		},
 	}
 }

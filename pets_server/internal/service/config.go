@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -143,7 +144,7 @@ func (s *ConfigService) loadEffective(ctx context.Context) (*domain.ConfigSnapsh
 		return nil, 0, err
 	}
 	snap.Points = pd.PointsConfig
-	snap.Interaction = pd.Interaction
+	snap.Interaction = s.fillInteractionDefaults(ctx, pd.Interaction)
 
 	cur, err := s.db.C(store.CollConfigFlags).Find(ctx, bson.M{})
 	if err != nil {
@@ -165,6 +166,64 @@ func (s *ConfigService) loadEffective(ctx context.Context) (*domain.ConfigSnapsh
 
 	normalizeSnapshot(snap)
 	return snap, meta.Version, nil
+}
+
+// fillInteractionDefaults 给老配置文档补上后加的互动字段（背景手势那四项）。
+//
+// 为什么必须补：config_points 是单文档，2026-10 之前发布的文档里没有这几个键，
+// BSON 解码缺字段得到 0，与「运营显式配成 0」无法区分。直接按 0 用的症状是
+// 升级后挠背景不涨任何数值，而管理端表单里显示的是空输入框，看不出根因。
+//
+// 判据用「键是否存在于原始文档」而不是「值是否为 0」：
+// 只有键缺失才补默认值，运营把背景收益显式填成 0 时仍然生效。
+func (s *ConfigService) fillInteractionDefaults(ctx context.Context,
+	ic domain.InteractionConfig) domain.InteractionConfig {
+
+	def := domain.DefaultSnapshot().Interaction
+
+	// 整份互动配置全 0：只可能来自「文档里没有 interaction 子文档」或
+	// 「用一份不含 interaction 的 draft 发布过一次」。此时任何手势都产出 0，
+	// 而服务端返回的 dailyCapReached=false —— 客户端看到的是「请求成功、收益 0、
+	// 也没到上限」，从响应里完全看不出异常，只能靠客户端把日志打出来才发现。
+	// 用默认值兜住，并留一条日志说明这份配置是被修过的而不是运营配的。
+	if ic == (domain.InteractionConfig{}) {
+		log.Printf("[config] 互动配置全为 0（config_points.interaction 缺失或曾被空草稿覆盖），已按默认值生效：%+v", def)
+		return def
+	}
+
+	if ic.BgScratchHappiness != 0 && ic.BgScratchExp != 0 &&
+		ic.BgSwipeHappiness != 0 && ic.BgSwipeExp != 0 {
+		return ic        // 四项都非 0，不存在「缺字段」的可能，省掉一次查询
+	}
+
+	// 只探这几个键在不在，不看值。
+	var probe struct {
+		Interaction struct {
+			BgScratchHappiness *int `bson:"bg_scratch_happiness"`
+			BgScratchExp       *int `bson:"bg_scratch_exp"`
+			BgSwipeHappiness   *int `bson:"bg_swipe_happiness"`
+			BgSwipeExp         *int `bson:"bg_swipe_exp"`
+		} `bson:"interaction"`
+	}
+	err := s.db.C(store.CollConfigPoints).
+		FindOne(ctx, store.F(store.D("_id", singletonID))).Decode(&probe)
+	if err != nil {
+		return ic        // 查不到就按原值走，不猜
+	}
+
+	p := probe.Interaction
+	if p.BgScratchHappiness == nil {		ic.BgScratchHappiness = def.BgScratchHappiness
+	}
+	if p.BgScratchExp == nil {
+		ic.BgScratchExp = def.BgScratchExp
+	}
+	if p.BgSwipeHappiness == nil {
+		ic.BgSwipeHappiness = def.BgSwipeHappiness
+	}
+	if p.BgSwipeExp == nil {
+		ic.BgSwipeExp = def.BgSwipeExp
+	}
+	return ic
 }
 
 func (s *ConfigService) loadList[T any](ctx context.Context, coll string) ([]T, error) {
@@ -199,6 +258,13 @@ func normalizeSnapshot(s *domain.ConfigSnapshot) {
 	sort.Slice(s.Level, func(i, j int) bool { return s.Level[i].Level < s.Level[j].Level })
 	if s.Flags == nil {
 		s.Flags = map[string]string{}
+	}
+
+	// 状态上限是 2026-10-30 新加的配置项，老文档里没有这个键。
+	// 在这里补成 100，生效配置就会显式带出 100，管理端一看就知道当前上限是多少，
+	// 不用去猜「没配是默认还是真的 0」。
+	if s.Points.StateMax <= 0 {
+		s.Points.StateMax = 100
 	}
 }
 

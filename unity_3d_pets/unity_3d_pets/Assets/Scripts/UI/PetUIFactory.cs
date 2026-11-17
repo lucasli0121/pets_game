@@ -33,19 +33,32 @@ namespace PetV1.UI
         private static Font s_font;
         private static Sprite s_whiteSprite;
 
+        /// <summary>打进包的中文字体（Resources 相对路径，不带扩展名）。</summary>
+        public const string BundledFontPath = "PetFont/NotoSansSC-Pet";
+
         /// <summary>
-        /// 中文字体。用系统字体而不是内置 LegacyRuntime.ttf ——
-        /// 后者没有 CJK 字形，所有中文会显示成方框（豆腐块）。
+        /// 中文字体。**第一优先是打进包的资源字体，不是系统字体。**
         ///
-        /// `Font.CreateDynamicFontFromOSFont` 在桌面端与移动端都可用；
-        /// Unity 6 上 name 参数传 null 会自动取默认字体，但显式列出候选更可控：
-        /// 不同平台可用的字体名不一样（iOS 是 PingFang SC，Android 是 Noto Sans CJK）。
+        /// 原因是 WebGL 的限制：它拿不到操作系统字体，
+        /// <c>Font.CreateDynamicFontFromOSFont</c> 在 WebGL 下不可用，
+        /// 而内置 <c>LegacyRuntime.ttf</c> 不含 CJK 字形（中文全是豆腐块）。
+        /// 所以 WebGL 下只有一条路：用资源目录里那份已经子集化的 Noto Sans CJK SC。
+        /// 子集由 fonttools 生成，只保留工程实际用字，15.7MB 压到 0.5MB；
+        /// 导入设置必须是 Unicode 图集模式，见 <see cref="PetV1.EditorTools.PetFontImporter"/>。
+        ///
+        /// 系统字体降级为编辑器/桌面端的兜底：改文案时若出现子集外的字，
+        /// 编辑器里能立刻看见实际效果，不至于因为缺字卡住排查。
         /// </summary>
         public static Font ResolveFont()
         {
             if (s_font != null) return s_font;
 
-            // 优先级从上到下。第一个存在的就用它。
+            // ① 资源字体。WebGL 下必须命中这一条。
+            s_font = Resources.Load<Font>(BundledFontPath);
+            if (s_font != null) return s_font;
+
+            // ② 桌面/编辑器兜底：系统字体。
+            // 优先级从上到下，第一个存在的就用它。
             string[] candidates =
             {
                 "Microsoft YaHei",     // Windows
@@ -64,13 +77,17 @@ namespace PetV1.UI
                 {
                     if (!set.Contains(name)) continue;
                     s_font = Font.CreateDynamicFontFromOSFont(name, PetUITheme.FontBody);
-                    if (s_font != null) return s_font;
+                    if (s_font != null)
+                    {
+                        Debug.LogWarning("[PetV1] UI：没加载到资源字体，退回系统字体「" + name +
+                                         "」。WebGL 下这条路径不可用，中文会显示成方块 —— " +
+                                         "检查 Resources/" + BundledFontPath + " 是否存在。");
+                        return s_font;
+                    }
                 }
             }
             catch (System.Exception e)
             {
-                // 某些平台（WebGL、部分精简 Linux）不支持枚举系统字体。
-                // 不是致命问题 —— 退回内置字体，界面仍能看，只是中文可能是方框。
                 Debug.LogWarning($"[PetV1] UI：枚举系统字体失败（{e.Message}），退回内置字体。");
             }
 

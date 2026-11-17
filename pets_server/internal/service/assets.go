@@ -389,7 +389,16 @@ func (a *AssetsService) BumpInteraction(ctx context.Context, userID string, exp,
 	return exp, happy, nil
 }
 
-// bumpPartial 当经验与快乐任一撞到日上限时，退化为只加未超限的那一项。
+// bumpPartial 当经验与快乐任一撞到日上限时，退化为只加未超限的那一项，
+// 且超限的那一项按剩余额度发放，而不是整笔丢弃。
+//
+// 为什么不能整笔丢：日上限 100、今日已得 97、本次请求带 5 点经验，
+// 97+5=102 超过上限 —— 旧写法一点不给，玩家当天永远停在 97，
+// 差的 3 点再也补不回来。界面表现为「经验+0，但明明没到上限」，像随机丢数据。
+// 按剩余额度补满 3 点后，上限才真正等于配置值。
+//
+// 并发说明：这里是先读后写，窗口很窄（客户端同一时刻只飞一条互动请求）。
+// 多端极端同时打可能多给几点，比「永远差几点」影响小，故不加分布式锁。
 func (a *AssetsService) bumpPartial(ctx context.Context, userID, day string, exp, happy, capExp, capHappy int) (int, int, error) {
 	var as domain.Assets
 	if err := a.db.C(store.CollAssets).FindOne(ctx, store.F(store.D("_id", userID))).Decode(&as); err != nil {
@@ -397,13 +406,17 @@ func (a *AssetsService) bumpPartial(ctx context.Context, userID, day string, exp
 	}
 	gainedExp, gainedHappy := 0, 0
 	inc := bson.D{}
-	if exp > 0 && (capExp <= 0 || as.DayExpGained+exp <= capExp) {
-		inc = append(inc, bson.E{Key: "day_exp_gained", Value: exp})
-		gainedExp = exp
+	if exp > 0 {
+		if grant := remainGrant(as.DayExpGained, exp, capExp); grant > 0 {
+			inc = append(inc, bson.E{Key: "day_exp_gained", Value: grant})
+			gainedExp = grant
+		}
 	}
-	if happy > 0 && (capHappy <= 0 || as.DayHappyGained+happy <= capHappy) {
-		inc = append(inc, bson.E{Key: "day_happy_gained", Value: happy})
-		gainedHappy = happy
+	if happy > 0 {
+		if grant := remainGrant(as.DayHappyGained, happy, capHappy); grant > 0 {
+			inc = append(inc, bson.E{Key: "day_happy_gained", Value: grant})
+			gainedHappy = grant
+		}
 	}
 	if len(inc) == 0 {
 		return 0, 0, nil
@@ -414,6 +427,24 @@ func (a *AssetsService) bumpPartial(ctx context.Context, userID, day string, exp
 			{Key: "$set", Value: bson.D{{Key: "day_key", Value: day}}},
 		})
 	return gainedExp, gainedHappy, err
+}
+
+// remainGrant 本次实际能发多少：不超过剩余额度，也不超过请求量。cap &lt;= 0 表示不限。
+func remainGrant(alreadyGained, want, cap int) int {
+	if want <= 0 {
+		return 0
+	}
+	if cap <= 0 {
+		return want
+	}
+	left := cap - alreadyGained
+	if left <= 0 {
+		return 0
+	}
+	if want > left {
+		return left
+	}
+	return want
 }
 
 func (a *AssetsService) writeLedger(ctx context.Context, userID string, delta, balanceAfter int,

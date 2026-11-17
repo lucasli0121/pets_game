@@ -171,6 +171,7 @@ func (s *PetService) settle(ctx context.Context, p *domain.Pet, snap *domain.Con
 		SatietyPerHour:   snap.Points.SatietyDecayPerHour,
 		HappinessPerHour: snap.Points.HappinessDecayPerHour,
 		MaxHours:         snap.Points.OfflineCapHours,
+		MaxState:         snap.Points.StateCap(),
 	})
 	if res.Hours == 0 && res.SettledAt == p.LastSettleAt {
 		return *p, false
@@ -340,9 +341,10 @@ func (s *PetService) Feed(ctx context.Context, userID, petID, foodID string) (*F
 	settled, _ := s.settle(ctx, pet, snap, timeutil.NowMs())
 	*pet = settled
 
-	// 2. 更新状态（下限 MinStateValue，状态不归零）
-	newSatiety := domain.ClampState(pet.Satiety+food.Satiety, 100)
-	newHappiness := domain.ClampState(pet.Happiness+food.Happiness, 100)
+	// 2. 更新状态（下限 MinStateValue，上限走配置 stateMax，状态不归零）
+	stateMax := pc.StateCap()
+	newSatiety := domain.ClampState(pet.Satiety+food.Satiety, stateMax)
+	newHappiness := domain.ClampState(pet.Happiness+food.Happiness, stateMax)
 	newExp := pet.Exp + int64(food.Exp)
 
 	// 3. 判定升级（逐级扣减）
@@ -403,9 +405,13 @@ func (s *PetService) Feed(ctx context.Context, userID, petID, foodID string) (*F
 // ---------- 互动 ----------
 
 type InteractResult struct {
-	Pet           domain.PetView `json:"pet"`
+	Pet domain.PetView `json:"pet"`
+	// 字段名以接口文档（apidoc）为准：happyGained / capped。
+	// 曾经写成 happinessGained / dailyCapReached，而客户端按文档读 happyGained，
+	// 结果永远读到 0 —— 收益其实到账了，客户端日志却显示「快乐+0」，
+	// 直接把排障方向带偏（2026-10-29 踩过一次）。
 	ExpGained     int64          `json:"expGained"`
-	HappinessGain int            `json:"happinessGained"`
+	HappyGained   int            `json:"happyGained"`
 	LevelUp       bool           `json:"levelUp"`
 	LevelsGained  []int          `json:"levelsGained"`
 	LevelupReward int            `json:"levelupReward"`
@@ -444,6 +450,11 @@ func (s *PetService) Interact(ctx context.Context, userID, petID, gesture string
 		happyPer, expPer = ic.ScratchHappiness, ic.ScratchExp
 	case domain.GestureSwipe:
 		happyPer, expPer = ic.SwipeHappiness, ic.SwipeExp
+	case domain.GestureBgScratch:
+		// 背景挠动：手指没落在宠物身上。收益压到最低，只当「有在玩」的反馈。
+		happyPer, expPer = ic.BgScratchHappiness, ic.BgScratchExp
+	case domain.GestureBgSwipe:
+		happyPer, expPer = ic.BgSwipeHappiness, ic.BgSwipeExp
 	default:
 		return nil, domain.Errf(domain.CodeParam, "未知手势：%s", gesture)
 	}
@@ -471,7 +482,7 @@ func (s *PetService) Interact(ctx context.Context, userID, petID, gesture string
 	}
 	capped := gainedExp < addExp || gainedHappy < addHappy
 
-	newHappiness := domain.ClampState(pet.Happiness+gainedHappy, 100)
+	newHappiness := domain.ClampState(pet.Happiness+gainedHappy, snap.Points.StateCap())
 	newExp := pet.Exp + int64(gainedExp)
 	curve := domain.NewLevelCurve(snap.Level)
 	oldLevel, _, _ := curve.Resolve(pet.Exp)
@@ -487,7 +498,7 @@ func (s *PetService) Interact(ctx context.Context, userID, petID, gesture string
 	}
 
 	res := &InteractResult{
-		ExpGained: int64(gainedExp), HappinessGain: gainedHappy,
+		ExpGained: int64(gainedExp), HappyGained: gainedHappy,
 		LevelUp: newLevel > oldLevel, LevelsGained: curve.LevelsBetween(oldLevel, newLevel),
 		Capped: capped,
 	}

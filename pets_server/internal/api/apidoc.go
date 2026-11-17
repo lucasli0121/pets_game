@@ -147,8 +147,8 @@ var apiSpecs = []APISpec{
 	{
 		Method: "POST", Path: "/api/v1/pet/interaction", Title: "上报互动", Group: "客户端", Auth: "用户 token", Idem: true,
 		Desc:    "**文档 13 个接口未覆盖互动经验**，但 PRD 4.3 要求互动涨快乐/经验。数值权威必须在服务端，交给客户端等于允许改包刷分，所以补这个接口：客户端只报手势与次数，收益按 InteractionConfig 计算，并受每日上限约束。",
-		Req:     []Field{{Name: "requestId", Type: "string", Required: true}, {Name: "petId", Type: "string", Required: true}, {Name: "gesture", Type: "string", Required: true, Desc: "TAP / PET / SCRATCH / SWIPE"}, {Name: "count", Type: "number", Required: true, Desc: "本次手势次数"}},
-		Resp:    []Field{{Name: "pet", Type: "object"}, {Name: "expGained", Type: "number"}, {Name: "happyGained", Type: "number"}, {Name: "dailyCapReached", Type: "boolean"}},
+		Req:     []Field{{Name: "requestId", Type: "string", Required: true}, {Name: "petId", Type: "string", Required: true}, {Name: "gesture", Type: "string", Required: true, Desc: "TAP / PET / SCRATCH / SWIPE，以及背景手势 BG_SCRATCH / BG_SWIPE（手指没落在宠物身上，收益更低）"}, {Name: "count", Type: "number", Required: true, Desc: "本次手势次数"}},
+		Resp:    []Field{{Name: "pet", Type: "object"}, {Name: "expGained", Type: "number"}, {Name: "happyGained", Type: "number"}, {Name: "capped", Type: "boolean", Desc: "命中每日上限"}},
 		Example: `{"requestId":"cli-int-0001","petId":"替换为真实 petId","gesture":"SCRATCH","count":3}`,
 		Errs:    []string{"1001 gesture 非法", "1004 宠物不存在"},
 	},

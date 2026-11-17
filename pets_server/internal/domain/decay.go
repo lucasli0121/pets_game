@@ -18,6 +18,9 @@ type DecayParams struct {
 	SatietyPerHour   int // 10
 	HappinessPerHour int // 5
 	MaxHours         int // 24
+	// MaxState 饱腹/快乐的数值上限，0 表示按 100。
+	// 加值路径（喂食/互动）与这里的衰减结算必须用同一个上限，见 PointsConfig.StateCap。
+	MaxState int // 100
 }
 
 type DecayResult struct {
@@ -52,8 +55,12 @@ func Settle(satiety, happiness int, lastSettleAt, now int64, p DecayParams) Deca
 	}
 
 	res.Hours = hours
-	res.Satiety = clampRange(satiety-p.SatietyPerHour*hours, MinStateValue, 100)
-	res.Happiness = clampRange(happiness-p.HappinessPerHour*hours, MinStateValue, 100)
+	maxState := p.MaxState
+	if maxState <= 0 {
+		maxState = 100 // 老调用方没传时保持原行为
+	}
+	res.Satiety = clampRange(satiety-p.SatietyPerHour*hours, MinStateValue, maxState)
+	res.Happiness = clampRange(happiness-p.HappinessPerHour*hours, MinStateValue, maxState)
 	res.SettledAt = lastSettleAt + int64(hours)*hourMS
 	return res
 }
