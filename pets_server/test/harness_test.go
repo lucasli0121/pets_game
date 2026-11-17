@@ -30,7 +30,7 @@ func mongoURI() string {
 	if v := os.Getenv("MONGO_URI"); v != "" {
 		return v
 	}
-	return "mongodb://admin:admin%40123@192.168.1.63:27017/?authSource=admin"
+	return "mongodb://localhost:27017/?authSource=admin"
 }
 
 func testDBName(t *testing.T) string {
