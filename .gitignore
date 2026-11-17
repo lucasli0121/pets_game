@@ -68,3 +68,6 @@ pets_server/bin/
 *.key
 *.p12
 secrets/
+
+# 服务端实际配置（模板见 cfg/pets_server.yaml.example）
+pets_server/cfg/pets_server.yaml

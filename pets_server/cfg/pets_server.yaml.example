@@ -1,0 +1,58 @@
+# 宠屋养成记 服务端配置
+#
+# 启动时从「工作目录」下的 cfg/pets_server.yaml 读取。
+# 优先级：环境变量 > 本文件 > 代码默认值。
+# 临时改某一项可以直接用命令前缀覆盖，例如：
+#   ADDR=:9000 ./pets_server_linux
+
+# ---- 进程 ----
+app_name:
+# ⚠️ 这是内部端口，不对外。公网入口是 Nginx 的 8090（HTTPS）。
+# 想再收紧一层可以写 "127.0.0.1:9090"，那样连内网都访问不到。
+addr:
+# 调试模式。dev 登录分支要求 AllowDevLogin && Debug && devOpenid 非空，
+# 所以调 dev 登录时这里必须是 true，否则登录会报「缺少 code」。
+# ⚠️ 上线前必须改回 false，并配上 wx_secret 走真实微信登录。
+#    true + allow_dev_login:true 意味着任何人都能伪造 openid 登录。
+debug:
+
+# ---- MongoDB ----
+# authSource 必须是 pets_game。写成 admin 会 Authentication failed，
+# 因为 pets_game 这个用户建在 pets_game 库里，不在 admin 库。
+mongo_uri:
+mongo_db:
+
+# ---- 安全 ----
+# JWT 签名密钥。换掉会导致已签发的 token 全部失效（所有玩家需重新登录）。
+jwt_secret:
+client_token_ttl_hours:
+admin_token_ttl_hours:
+allow_dev_login:
+
+# 管理员初始账号。只在 admin_users 集合为空时生效（首次建库）。
+# 从本地迁过来的库里已有 admin 账号，所以这两项对当前部署不生效。
+admin_init_username:
+admin_init_password:
+config_release_keep:
+
+# ---- 微信 ----
+# 客户端目前走 devOpenid 开发登录，不填 wx_secret 也能跑。
+wx_appid:
+wx_secret:
+
+# ---- 限流 ----
+rate_limit_window_sec:
+rate_limit_max_calls:
+
+# ---- 静态资源 ----
+# 相对工作目录，所以必须在包根启动（cfg/ bin/ assets/ 同级那层）
+asset_dir:
+# 指到 CDN 时填这个，填了之后 /assets/ 路由就不再被访问
+asset_base_url:
+
+# 管理端前端目录（相对工作目录）。
+# 配了就用磁盘上的版本，改完刷新浏览器即生效，不用重编译；
+# 留空或目录不存在时回落到二进制内嵌的版本。
+# 注意相对的是「工作目录」而不是二进制所在目录：放 bin/admin 没用，
+# 要在实例根（和 cfg/ assets/ 同级）建 admin/。
+admin_dir:
