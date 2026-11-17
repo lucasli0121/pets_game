@@ -82,3 +82,20 @@ unity_3d_pets/unity_3d_pets/TextToolDatas/
 unity_3d_pets/unity_3d_pets/Data/
 unity_3d_pets/unity_3d_pets/Assets/WX-WASM-SDK-V2/
 unity_3d_pets/unity_3d_pets/Assets/WX-WASM-SDK-V2.meta
+
+# ---- 本地构建日志与临时产物 ----
+/*.log
+/qr_*.png
+/audio_candidates/
+/unity_3d_pets_builtin/
+
+# ---- 软著申请与证件类材料（含签名、身份证号，禁止入库）----
+docs/电子宠物软著申请签章页*.pdf
+docs/扫描全能王*.jpg
+docs/宠屋养成记源码.*
+docs/宠屋养成记微信小游戏appid信息.txt
+docs/软著申请文案_宠屋养成记.md
+docs/_crop/
+
+# ---- 部署配置（可能含密钥）----
+pets_server/.deploy/

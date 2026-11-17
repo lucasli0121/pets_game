@@ -19,9 +19,15 @@
 
 ## 第三方资产
 
-`Assets/ithappy/Animals_FREE/` 为 Unity Asset Store 资产，不在本仓库的 MIT 许可范围内。
-如该目录缺失或需在自有项目中使用，请从 Unity Asset Store 获取 **ithappy Animals FREE**
-后导入到同一路径。
+以下两项不在仓库内，缺失时工程无法直接编译或构建，需自行获取后放到指定路径：
+
+| 路径 | 资产 | 获取方式 |
+| --- | --- | --- |
+| `unity_3d_pets/unity_3d_pets/Assets/ithappy/Animals_FREE/` | **ithappy Animals FREE** | Unity Asset Store 获取后导入到同一路径 |
+| `unity_3d_pets/unity_3d_pets/Assets/WX-WASM-SDK-V2/` | **微信小游戏 Unity 转换 SDK** | 从微信官方获取后导入到同一路径 |
+
+两者都不在本仓库的 MIT 许可范围内，具体见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+工程其余部分（脚本、场景、渲染设置、WebGL 模板）均已入库。
 
 ## 许可
 
